@@ -52,7 +52,9 @@ def strip_markdown_formatting(text: str) -> str:
 
 
 def extract_plain_text(
-    doc: Document, include_supplements: bool = True,
+    doc: Document,
+    include_supplements: bool = True,
+    include_metadata: bool = False,
 ) -> str:
     """Extract plain text from a Document, stripping Markdown formatting.
 
@@ -63,6 +65,8 @@ def extract_plain_text(
     Args:
         doc: A populated Document model.
         include_supplements: Whether to include supplement text.
+        include_metadata: Whether to include article metadata
+            (journal, DOI, PMID, etc.).
 
     Returns:
         Plain text with double-newline paragraph separation.
@@ -71,6 +75,21 @@ def extract_plain_text(
 
     if doc.title:
         parts.append(strip_markdown_formatting(doc.title))
+
+    if include_metadata:
+        meta_parts: list[str] = []
+        if doc.journal:
+            meta_parts.append(f"Journal: {doc.journal}")
+        if doc.doi:
+            meta_parts.append(f"DOI: {doc.doi}")
+        if doc.pmid:
+            meta_parts.append(f"PMID: {doc.pmid}")
+        if doc.pmcid:
+            meta_parts.append(f"PMCID: {doc.pmcid}")
+        if doc.pub_date:
+            meta_parts.append(f"Published: {doc.pub_date}")
+        if meta_parts:
+            parts.append("; ".join(meta_parts))
 
     for para in doc.abstract:
         parts.append(strip_markdown_formatting(para.text))

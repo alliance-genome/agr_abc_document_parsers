@@ -25,6 +25,7 @@ def emit_markdown(doc: Document) -> str:
     lines: list[str] = []
 
     _emit_title(doc, lines)
+    _emit_metadata(doc, lines)
     _emit_authors(doc, lines)
     _emit_abstract(doc, lines)
     _emit_keywords(doc, lines)
@@ -47,11 +48,43 @@ def _emit_title(doc: Document, lines: list[str]) -> None:
     lines.append("")
 
 
+def _emit_metadata(doc: Document, lines: list[str]) -> None:
+    """Emit article-level metadata block after the title."""
+    meta_parts: list[str] = []
+    if doc.journal:
+        meta_parts.append(f"**Journal:** {doc.journal}")
+    if doc.doi:
+        meta_parts.append(f"**DOI:** {doc.doi}")
+    if doc.pmid:
+        meta_parts.append(f"**PMID:** {doc.pmid}")
+    if doc.pmcid:
+        meta_parts.append(f"**PMCID:** {doc.pmcid}")
+    cite_parts = []
+    if doc.volume:
+        vol_str = doc.volume
+        if doc.issue:
+            vol_str += f"({doc.issue})"
+        cite_parts.append(vol_str)
+    if doc.pages:
+        cite_parts.append(doc.pages)
+    if cite_parts:
+        meta_parts.append(f"**Citation:** {', '.join(cite_parts)}")
+    if doc.pub_date:
+        meta_parts.append(f"**Published:** {doc.pub_date}")
+    if doc.license:
+        meta_parts.append(f"**License:** {doc.license}")
+    if not meta_parts:
+        return
+    for part in meta_parts:
+        lines.append(part)
+    lines.append("")
+
+
 def _emit_authors(doc: Document, lines: list[str]) -> None:
     if not doc.authors:
         return
 
-    # Plain comma-separated author names (matches consensus pipeline format)
+    # Comma-separated author names
     author_parts = []
     for author in doc.authors:
         name = f"{author.given_name} {author.surname}".strip()
@@ -60,6 +93,19 @@ def _emit_authors(doc: Document, lines: list[str]) -> None:
 
     if author_parts:
         lines.append(", ".join(author_parts))
+        lines.append("")
+
+    # Affiliations (deduplicated, numbered)
+    all_affils: list[str] = []
+    seen: set[str] = set()
+    for author in doc.authors:
+        for aff in author.affiliations:
+            if aff and aff not in seen:
+                seen.add(aff)
+                all_affils.append(aff)
+    if all_affils:
+        for i, aff in enumerate(all_affils, 1):
+            lines.append(f"{i}. {aff}")
         lines.append("")
 
 

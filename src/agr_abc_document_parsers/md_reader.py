@@ -21,6 +21,8 @@ from agr_abc_document_parsers.models import (
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _KEYWORDS_RE = re.compile(r"^\*\*Keywords:\*\*\s*(.+)$")
+_META_RE = re.compile(r"^\*\*(\w[\w\s]*):\*\*\s*(.+)$")
+_AFFIL_LINE_RE = re.compile(r"^\d+\.\s+(.+)$")
 _BOLD_LABEL_RE = re.compile(r"^\*\*(.+?)\.\*\*(?:\s+(.*))?$")
 _FIGURE_LABEL_RE = re.compile(
     r"^(Figure|Fig\.|Supplementary Figure|Supplementary Fig\.)\s*\d+",
@@ -69,6 +71,19 @@ def read_markdown(text: str) -> Document:
         pos += 1
         pos = _skip_blank(lines, pos, n)
 
+    # --- Metadata lines (**Key:** value) ---
+    _META_KEYS = {
+        "Journal", "DOI", "PMID", "PMCID", "Citation", "Published", "License",
+    }
+    while pos < n:
+        m = _META_RE.match(lines[pos])
+        if m and m.group(1) in _META_KEYS:
+            _apply_metadata(doc, m.group(1), m.group(2))
+            pos += 1
+            pos = _skip_blank(lines, pos, n)
+        else:
+            break
+
     # --- Author line (non-heading, non-keyword, non-bold-label before first H2) ---
     if (
         pos < n
@@ -83,6 +98,11 @@ def read_markdown(text: str) -> Document:
         doc.authors = _parse_author_line(lines[pos])
         pos += 1
         pos = _skip_blank(lines, pos, n)
+
+    # --- Affiliation lines (numbered list after authors, before first H2) ---
+    while pos < n and _AFFIL_LINE_RE.match(lines[pos]):
+        pos += 1
+    pos = _skip_blank(lines, pos, n)
 
     # --- Keywords before first H2 (if no abstract) ---
     if pos < n and _KEYWORDS_RE.match(lines[pos]):
@@ -153,6 +173,31 @@ def load_document_with_supplements(
         for supp_md in supplement_mds:
             doc.supplements.append(read_markdown(supp_md))
     return doc
+
+
+def _apply_metadata(doc: Document, key: str, value: str) -> None:
+    """Apply a parsed metadata line to the document."""
+    if key == "Journal":
+        doc.journal = value
+    elif key == "DOI":
+        doc.doi = value
+    elif key == "PMID":
+        doc.pmid = value
+    elif key == "PMCID":
+        doc.pmcid = value
+    elif key == "Published":
+        doc.pub_date = value
+    elif key == "License":
+        doc.license = value
+    elif key == "Citation":
+        # Parse "10(2), e1004133" -> volume, issue, pages
+        m = re.match(r"(\d+)(?:\(([^)]+)\))?(?:,\s*(.+))?$", value)
+        if m:
+            doc.volume = m.group(1)
+            if m.group(2):
+                doc.issue = m.group(2)
+            if m.group(3):
+                doc.pages = m.group(3).strip()
 
 
 # ---------------------------------------------------------------------------

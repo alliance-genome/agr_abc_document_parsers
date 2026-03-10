@@ -1,4 +1,5 @@
 """Tests for Markdown schema validator."""
+from __future__ import annotations
 
 from agr_abc_document_parsers.md_emitter import emit_markdown
 from agr_abc_document_parsers.md_validator import (

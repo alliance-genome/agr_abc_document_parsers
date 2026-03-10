@@ -53,6 +53,9 @@ def parse_jats(
     doc.keywords = _parse_keywords(root)
     doc.abstract = _parse_abstract(root)
 
+    # Article-level metadata
+    _parse_article_meta(root, doc)
+
     # Parse affiliations first, then resolve into authors
     aff_map = _parse_affiliations(root)
     doc.authors = _parse_authors(root, aff_map)
@@ -73,15 +76,97 @@ def parse_jats(
 
 
 def _parse_title(root: etree._Element) -> str:
-    """Extract title from article-meta/title-group/article-title."""
+    """Extract title from article-meta/title-group/article-title.
+
+    Preserves inline formatting (italic, bold, sup, sub) as Markdown.
+    """
     title_elem = root.find(".//article-meta/title-group/article-title")
-    return all_text(title_elem)
+    if title_elem is None:
+        return ""
+    return _inline_text(title_elem).strip()
 
 
 def _parse_doi(root: etree._Element) -> str:
     """Extract DOI from article-id[@pub-id-type='doi']."""
     doi_elem = root.find(".//article-meta/article-id[@pub-id-type='doi']")
     return text(doi_elem)
+
+
+def _parse_article_meta(root: etree._Element, doc: Document) -> None:
+    """Extract article-level metadata: PMID, PMC ID, journal, dates, etc."""
+    meta = root.find(".//article-meta")
+    if meta is None:
+        return
+
+    # PMID
+    pmid_el = meta.find("article-id[@pub-id-type='pmid']")
+    if pmid_el is not None:
+        doc.pmid = text(pmid_el)
+
+    # PMC ID
+    pmc_el = meta.find("article-id[@pub-id-type='pmc']")
+    if pmc_el is not None:
+        doc.pmcid = text(pmc_el)
+
+    # Journal name
+    journal_el = root.find(".//journal-meta/journal-title-group/journal-title")
+    if journal_el is None:
+        journal_el = root.find(".//journal-meta/journal-title")
+    if journal_el is not None:
+        doc.journal = text(journal_el)
+    else:
+        # Fallback: abbreviated journal name
+        abbrev_el = root.find(
+            ".//journal-meta/journal-id[@journal-id-type='nlm-ta']"
+        )
+        if abbrev_el is not None:
+            doc.journal = text(abbrev_el)
+
+    # Volume, issue, pages
+    vol_el = meta.find("volume")
+    if vol_el is not None:
+        doc.volume = text(vol_el)
+    issue_el = meta.find("issue")
+    if issue_el is not None:
+        doc.issue = text(issue_el)
+    fpage = meta.find("fpage")
+    lpage = meta.find("lpage")
+    elocation = meta.find("elocation-id")
+    if fpage is not None:
+        fp = text(fpage)
+        lp = text(lpage) if lpage is not None else ""
+        doc.pages = f"{fp}-{lp}" if lp and lp != fp else fp
+    elif elocation is not None:
+        doc.pages = text(elocation)
+
+    # Publication date (prefer epub, then collection, then ppub)
+    pub_date = None
+    for dtype in ["epub", "collection", "ppub"]:
+        pub_date = meta.find(f"pub-date[@pub-type='{dtype}']")
+        if pub_date is not None:
+            break
+    if pub_date is None:
+        # Some JATS use date-type instead of pub-type
+        for dtype in ["pub", "collection"]:
+            pub_date = meta.find(f"pub-date[@date-type='{dtype}']")
+            if pub_date is not None:
+                break
+    if pub_date is not None:
+        year = text(pub_date.find("year"))
+        month = text(pub_date.find("month"))
+        day = text(pub_date.find("day"))
+        if year:
+            parts = [year]
+            if month:
+                parts.append(month.zfill(2))
+                if day:
+                    parts.append(day.zfill(2))
+            doc.pub_date = "-".join(parts)
+
+    # License
+    license_el = meta.find(".//permissions/license/license-p")
+    if license_el is not None:
+        doc.license = all_text(license_el)
 
 
 def _parse_keywords(root: etree._Element) -> list[str]:
@@ -457,10 +542,10 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
         parts = []
         title = caption_elem.find("title")
         if title is not None:
-            parts.append(all_text(title))
+            parts.append(_inline_text(title).strip())
         for p in caption_elem.findall("p"):
-            parts.append(all_text(p))
-        fig.caption = " ".join(parts)
+            parts.append(_inline_text(p).strip())
+        fig.caption = " ".join(p for p in parts if p)
 
     graphic_elem = fig_elem.find("graphic")
     if graphic_elem is not None:
@@ -488,10 +573,10 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         parts = []
         title = caption_elem.find("title")
         if title is not None:
-            parts.append(all_text(title))
+            parts.append(_inline_text(title).strip())
         for p in caption_elem.findall("p"):
-            parts.append(all_text(p))
-        table.caption = " ".join(parts)
+            parts.append(_inline_text(p).strip())
+        table.caption = " ".join(p for p in parts if p)
 
     table_elem = tw_elem.find("table")
     if table_elem is not None:

@@ -53,6 +53,7 @@ def parse_tei(
     doc.abstract = _parse_abstract(root)
     doc.keywords = _parse_keywords(root)
     doc.doi = _parse_doi(root)
+    _parse_article_meta_tei(root, doc)
     doc.sections = _parse_body(root)
     doc.figures, doc.tables = _parse_top_level_figures(root)
     doc.references = _parse_bibliography(root)
@@ -67,9 +68,14 @@ def parse_tei(
 
 
 def _parse_title(root: etree._Element) -> str:
-    """Extract title from //teiHeader//title[@level='a']."""
+    """Extract title from //teiHeader//title[@level='a'].
+
+    Preserves inline formatting (italic, bold, sup, sub) as Markdown.
+    """
     title_elem = root.find(".//tei:teiHeader//tei:title[@level='a']", NS)
-    return all_text(title_elem)
+    if title_elem is None:
+        return ""
+    return _inline_text_tei(title_elem).strip()
 
 
 def _parse_authors(root: etree._Element) -> list[Author]:
@@ -162,6 +168,61 @@ def _parse_doi(root: etree._Element) -> str:
         ".//tei:sourceDesc//tei:idno[@type='DOI']", NS
     )
     return text(doi_elem)
+
+
+def _parse_article_meta_tei(root: etree._Element, doc: Document) -> None:
+    """Extract article-level metadata from TEI header."""
+    # Journal title from monogr
+    journal_el = root.find(
+        ".//tei:sourceDesc//tei:monogr/tei:title[@level='j']", NS
+    )
+    if journal_el is not None:
+        doc.journal = text(journal_el)
+
+    monogr = root.find(".//tei:sourceDesc//tei:monogr", NS)
+    if monogr is not None:
+        # Volume
+        vol_el = monogr.find(
+            "tei:imprint/tei:biblScope[@unit='volume']", NS
+        )
+        if vol_el is not None:
+            doc.volume = text(vol_el)
+        # Issue
+        issue_el = monogr.find(
+            "tei:imprint/tei:biblScope[@unit='issue']", NS
+        )
+        if issue_el is not None:
+            doc.issue = text(issue_el)
+        # Pages
+        page_el = monogr.find(
+            "tei:imprint/tei:biblScope[@unit='page']", NS
+        )
+        if page_el is not None:
+            fr = page_el.get("from", "")
+            to = page_el.get("to", "")
+            if fr and to and fr != to:
+                doc.pages = f"{fr}-{to}"
+            elif fr:
+                doc.pages = fr
+            elif text(page_el):
+                doc.pages = text(page_el)
+        # Publication date
+        date_el = monogr.find("tei:imprint/tei:date[@type='published']", NS)
+        if date_el is not None:
+            when = date_el.get("when", "")
+            if when:
+                doc.pub_date = when
+
+    # PMID and PMCID from idno elements
+    for idno in root.findall(
+        ".//tei:sourceDesc//tei:idno", NS
+    ):
+        id_type = (idno.get("type") or "").upper()
+        val = text(idno)
+        if id_type == "PMID" and val:
+            doc.pmid = val
+        elif id_type == "PMCID" and val:
+            doc.pmcid = val
 
 
 def _parse_body(root: etree._Element) -> list[Section]:
