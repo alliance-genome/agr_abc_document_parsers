@@ -363,13 +363,15 @@ def _parse_content(data: DocumentInput, format: Format) -> Document:
 
     if format == "auto":
         from agr_abc_document_parsers.converter import detect_format
-        format = detect_format(data)
+        detected = detect_format(data)
+    else:
+        detected = format
 
-    if format == "tei":
+    if detected == "tei":
         from agr_abc_document_parsers.tei_parser import parse_tei
         return parse_tei(data)
-    if format == "jats":
+    if detected == "jats":
         from agr_abc_document_parsers.jats_parser import parse_jats
         return parse_jats(data)
 
-    raise ValueError(f"Unknown format: '{format}'")
+    raise ValueError(f"Unknown format: '{detected}'")
