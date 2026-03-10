@@ -109,3 +109,4 @@ class Document:
     acknowledgments: str = ""
     back_matter: list[Section] = field(default_factory=list)
     source_format: str = ""  # "tei" or "jats"
+    supplements: list[Document] = field(default_factory=list)

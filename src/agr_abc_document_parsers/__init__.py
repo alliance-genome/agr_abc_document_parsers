@@ -12,6 +12,10 @@ from agr_abc_document_parsers.converter import (  # noqa: F401
 )
 from agr_abc_document_parsers.jats_parser import parse_jats  # noqa: F401
 from agr_abc_document_parsers.md_emitter import emit_markdown  # noqa: F401
+from agr_abc_document_parsers.md_reader import (  # noqa: F401
+    load_document_with_supplements,
+    read_markdown,
+)
 from agr_abc_document_parsers.md_validator import (  # noqa: F401
     Severity,
     ValidationIssue,
