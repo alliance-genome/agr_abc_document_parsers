@@ -35,4 +35,10 @@ from agr_abc_document_parsers.models import (  # noqa: F401
     Table,
     TableCell,
 )
+from agr_abc_document_parsers.plain_text import (  # noqa: F401
+    extract_abstract_text,
+    extract_plain_text,
+    extract_sentences,
+    strip_markdown_formatting,
+)
 from agr_abc_document_parsers.tei_parser import parse_tei  # noqa: F401
