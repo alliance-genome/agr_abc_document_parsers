@@ -3,7 +3,7 @@
 **Date:** 2026-03-09
 **Jira:** SCRUM-5869
 **Points:** 13
-**Status:** In Progress
+**Status:** Complete (v1.0.0)
 
 ## Overview
 
@@ -71,12 +71,14 @@ Dependencies: `lxml` (XML parsing).
 - [x] CI workflow: ruff + mypy + pytest
 - [x] PyPI publish workflow (triggered on tag)
 - [x] README with install instructions and basic usage examples
-- [ ] GitHub repo created at `alliance-genome/agr_abc_document_parsers`
-- [ ] Publish `v0.1.0` to PyPI
+- [x] GitHub repo created at `alliance-genome/agr_abc_document_parsers`
+- [ ] Publish to PyPI (pending trusted publisher OIDC configuration)
 
 ---
 
-## Phase 2: Markdown reader + supplement support
+## Phase 2: Markdown reader + supplement support ✅
+
+**Status:** Complete
 
 ### 2.1 Model extension — `Document.supplements`
 
@@ -201,19 +203,21 @@ Additional tests for supplements:
 
 ### 2.5 Acceptance criteria (Phase 2)
 
-- [ ] `Document.supplements: list[Document]` field added
-- [ ] `read_markdown(text) -> Document` parses all schema elements
-- [ ] `read_markdown()` handles incomplete/partial documents gracefully
-- [ ] `load_document_with_supplements()` helper function
-- [ ] Round-trip test passes on all existing test fixtures
-- [ ] Round-trip test passes on a sample of real converted production files
-- [ ] Supplement-specific tests (no title, no abstract, body-only)
-- [ ] No new external dependencies
-- [ ] `__init__.py` exports `read_markdown`, `load_document_with_supplements`
+- [x] `Document.supplements: list[Document]` field added
+- [x] `read_markdown(text) -> Document` parses all schema elements
+- [x] `read_markdown()` handles incomplete/partial documents gracefully
+- [x] `load_document_with_supplements()` helper function
+- [x] Round-trip test passes on all existing test fixtures
+- [x] Round-trip test passes on a sample of real converted production files
+- [x] Supplement-specific tests (no title, no abstract, body-only)
+- [x] No new external dependencies
+- [x] `__init__.py` exports `read_markdown`, `load_document_with_supplements`
 
 ---
 
-## Phase 3: Plain text extraction
+## Phase 3: Plain text extraction ✅
+
+**Status:** Complete
 
 ### 3.1 `plain_text.py` — extract ML-ready plain text
 
@@ -269,14 +273,14 @@ def strip_markdown_formatting(text: str) -> str:
 
 ### 3.2 Acceptance criteria (Phase 3)
 
-- [ ] `extract_plain_text(doc)` returns stripped text from all sections
-- [ ] `extract_abstract_text(doc)` returns stripped abstract
-- [ ] `extract_sentences(doc)` splits on sentence boundaries correctly
-- [ ] `strip_markdown_formatting()` handles all inline formats
-- [ ] Supplement text included when `include_supplements=True`
-- [ ] Sentence splitting handles common abbreviations (Dr., Fig., et al., etc.)
-- [ ] Test with real converted Markdown files
-- [ ] No new external dependencies
+- [x] `extract_plain_text(doc)` returns stripped text from all sections
+- [x] `extract_abstract_text(doc)` returns stripped abstract
+- [x] `extract_sentences(doc)` splits on sentence boundaries correctly
+- [x] `strip_markdown_formatting()` handles all inline formats
+- [x] Supplement text included when `include_supplements=True`
+- [x] Sentence splitting handles common abbreviations (Dr., Fig., et al., etc.)
+- [x] Test with real converted Markdown files
+- [x] No new external dependencies
 
 ---
 

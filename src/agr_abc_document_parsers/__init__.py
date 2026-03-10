@@ -4,7 +4,7 @@ Provides parsers, emitters, readers, and validators for the ABC Markdown
 format used across all AGR services for scientific publications.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 from agr_abc_document_parsers.converter import (  # noqa: F401
     convert_xml_to_markdown,
