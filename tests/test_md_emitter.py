@@ -9,6 +9,7 @@ from agr_abc_document_parsers.models import (
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
     TableCell,
@@ -350,3 +351,137 @@ class TestMdEmitter:
         assert "PMID:11111111" in md
         assert "PMCID:PMC9999999" in md
         assert "https://example.com/data" in md
+
+
+class TestMdEmitterNewFeatures:
+    """Tests for secondary abstracts, sub-articles, categories, roles."""
+
+    def test_emit_secondary_abstracts(self):
+        """Secondary abstracts after main abstract, before keywords."""
+        doc = _make_doc(
+            title="Paper",
+            abstract=[Paragraph(text="Main abstract.")],
+            secondary_abstracts=[
+                SecondaryAbstract(
+                    abstract_type="summary",
+                    label="Author Summary",
+                    paragraphs=[Paragraph(text="Plain language summary.")],
+                ),
+            ],
+            keywords=["kw1", "kw2"],
+        )
+        md = emit_markdown(doc)
+        lines = md.split("\n")
+        # Find positions
+        abstract_idx = next(i for i, ln in enumerate(lines) if "## Abstract" in ln)
+        sa_idx = next(i for i, ln in enumerate(lines) if "## Author Summary" in ln)
+        kw_idx = next(i for i, ln in enumerate(lines) if "**Keywords:**" in ln)
+        assert abstract_idx < sa_idx < kw_idx
+        assert "Plain language summary." in md
+
+    def test_emit_sub_articles(self):
+        """Sub-articles after references with --- separator."""
+        doc = _make_doc(
+            title="Paper",
+            references=[
+                Reference(index=1, authors=["A B"], title="T",
+                          journal="J", year="2024"),
+            ],
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    article_type="decision-letter",
+                    authors=[Author(given_name="Pat", surname="Wittkopp")],
+                    sections=[Section(heading="Summary", paragraphs=[
+                        Paragraph(text="The reviewers find the paper interesting."),
+                    ])],
+                ),
+                Document(
+                    title="Author response",
+                    article_type="reply",
+                    sections=[Section(paragraphs=[
+                        Paragraph(text="We thank the reviewers."),
+                    ])],
+                    references=[
+                        Reference(index=1, authors=["X Y"], title="Sub ref",
+                                  journal="J2", year="2023"),
+                    ],
+                ),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "---" in md
+        assert "## Decision letter" in md
+        assert "Pat Wittkopp" in md
+        assert "### Summary" in md
+        assert "The reviewers find the paper interesting." in md
+        assert "## Author response" in md
+        assert "We thank the reviewers." in md
+        assert "### References" in md
+        assert "Sub ref" in md
+
+    def test_emit_categories(self):
+        """Categories line in correct position."""
+        doc = _make_doc(
+            title="Paper",
+            categories=["Research Article", "Cell Biology"],
+            authors=[Author(given_name="A", surname="B")],
+        )
+        md = emit_markdown(doc)
+        lines = md.split("\n")
+        cat_idx = next(i for i, ln in enumerate(lines)
+                       if "**Categories:**" in ln)
+        author_idx = next(i for i, ln in enumerate(lines) if "A B" in ln)
+        title_idx = next(i for i, ln in enumerate(lines) if "# Paper" in ln)
+        assert title_idx < cat_idx < author_idx
+        assert "**Categories:** Research Article, Cell Biology" in md
+
+    def test_emit_author_roles(self):
+        """Author role footnotes after references."""
+        doc = _make_doc(
+            title="Paper",
+            authors=[
+                Author(given_name="Rachel", surname="Waymack",
+                       roles=["Conceptualization", "Software"]),
+                Author(given_name="Alvaro", surname="Fletcher",
+                       roles=["Investigation"]),
+                Author(given_name="Jane", surname="Smith"),
+            ],
+            references=[
+                Reference(index=1, authors=["A B"], title="T",
+                          journal="J", year="2024"),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "[^1]: Rachel Waymack: Conceptualization, Software" in md
+        assert "[^2]: Alvaro Fletcher: Investigation" in md
+        # Jane Smith has no roles — no footnote emitted for her
+        assert "[^3]:" not in md
+
+    def test_emit_no_roles_no_footnotes(self):
+        """No role footnotes when no author has roles."""
+        doc = _make_doc(
+            title="Paper",
+            authors=[Author(given_name="A", surname="B")],
+        )
+        md = emit_markdown(doc)
+        assert "[^" not in md
+
+    def test_emit_sub_article_no_second_h1(self):
+        """Sub-articles use H2, not H1 — validator S01 not violated."""
+        from agr_abc_document_parsers.md_validator import validate_markdown
+        doc = _make_doc(
+            title="Paper",
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    sections=[Section(paragraphs=[
+                        Paragraph(text="Body."),
+                    ])],
+                ),
+            ],
+        )
+        md = emit_markdown(doc)
+        result = validate_markdown(md)
+        s01_errors = [e for e in result.errors if e.rule_id == "S01"]
+        assert len(s01_errors) == 0

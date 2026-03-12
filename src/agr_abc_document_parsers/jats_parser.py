@@ -15,6 +15,7 @@ from agr_abc_document_parsers.models import (
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
     TableCell,
@@ -51,7 +52,16 @@ def parse_jats(
     doc.title = _parse_title(root)
     doc.doi = _parse_doi(root)
     doc.keywords = _parse_keywords(root)
-    doc.abstract = _parse_abstract(root)
+
+    main_abstract_elem = _find_main_abstract(root)
+    doc.abstract = (
+        _parse_abstract_content(main_abstract_elem)
+        if main_abstract_elem is not None else []
+    )
+    doc.secondary_abstracts = _parse_secondary_abstracts(
+        root, main_abstract_elem,
+    )
+    doc.categories = _parse_categories(root)
 
     # Article-level metadata
     _parse_article_meta(root, doc)
@@ -71,6 +81,9 @@ def parse_jats(
 
     # Parse floats-group (figures/tables outside body, common in PMC nXML)
     _parse_floats_group(root, doc)
+
+    # Sub-articles (decision letters, author responses, etc.)
+    doc.sub_articles = _parse_sub_articles(root)
 
     return doc
 
@@ -179,17 +192,24 @@ def _parse_keywords(root: etree._Element) -> list[str]:
     return keywords
 
 
-def _parse_abstract(root: etree._Element) -> list[Paragraph]:
-    """Extract abstract paragraphs.
+def _find_main_abstract(
+    root: etree._Element,
+) -> etree._Element | None:
+    """Find the main abstract element.
 
-    Handles both plain abstracts (<abstract><p>...) and structured
-    abstracts (<abstract><sec><title>Background</title><p>...) common
-    in PMC papers.
+    Prefers the ``<abstract>`` with no ``abstract-type`` attribute.
+    If all abstracts have a type, returns the first one.
     """
-    abstract_elem = root.find(".//article-meta/abstract")
-    if abstract_elem is None:
-        return []
+    for ab in root.findall(".//article-meta/abstract"):
+        if ab.get("abstract-type") is None:
+            return ab
+    return root.find(".//article-meta/abstract")
 
+
+def _parse_abstract_content(
+    abstract_elem: etree._Element,
+) -> list[Paragraph]:
+    """Parse paragraphs from an ``<abstract>`` element."""
     paragraphs: list[Paragraph] = []
 
     # Check for structured abstract with <sec> children
@@ -211,6 +231,123 @@ def _parse_abstract(root: etree._Element) -> list[Paragraph]:
                 paragraphs.append(para)
 
     return paragraphs
+
+
+_SECONDARY_ABSTRACT_LABELS: dict[str, str] = {
+    "summary": "Author Summary",
+    "executive-summary": "eLife Digest",
+    "toc": "Table of Contents Summary",
+    "plain-language-summary": "Plain Language Summary",
+}
+
+
+def _parse_secondary_abstracts(
+    root: etree._Element,
+    main_abstract: etree._Element | None,
+) -> list[SecondaryAbstract]:
+    """Extract secondary abstracts (Author Summary, eLife Digest, etc.).
+
+    Args:
+        root: The XML root element.
+        main_abstract: The element already claimed as the main abstract,
+            to be excluded from secondary abstracts.
+    """
+    results: list[SecondaryAbstract] = []
+    for ab in root.findall(".//article-meta/abstract"):
+        if ab is main_abstract:
+            continue
+        ab_type = ab.get("abstract-type")
+        if ab_type is None:
+            continue
+        # Determine label: prefer explicit <title>, then mapping, then title-case
+        title_elem = ab.find("title")
+        if title_elem is not None:
+            label = all_text(title_elem)
+        else:
+            label = _SECONDARY_ABSTRACT_LABELS.get(
+                ab_type, ab_type.replace("-", " ").title()
+            )
+        paragraphs = _parse_abstract_content(ab)
+        results.append(SecondaryAbstract(
+            abstract_type=ab_type,
+            label=label,
+            paragraphs=paragraphs,
+        ))
+    return results
+
+
+def _parse_sub_articles(root: etree._Element) -> list[Document]:
+    """Parse ``<sub-article>`` elements into Document objects."""
+    results: list[Document] = []
+    for sub_el in root.findall("sub-article"):
+        results.append(_parse_sub_article(sub_el))
+    return results
+
+
+def _parse_sub_article(sub_el: etree._Element) -> Document:
+    """Parse a single ``<sub-article>`` into a Document."""
+    doc = Document(source_format="jats")
+    doc.article_type = sub_el.get("article-type", "")
+
+    # Front stub metadata
+    front_stub = sub_el.find("front-stub")
+    if front_stub is not None:
+        title_el = front_stub.find("title-group/article-title")
+        if title_el is not None:
+            doc.title = _inline_text(title_el).strip()
+
+        # Authors from front-stub/contrib-group
+        aff_map: dict[str, str] = {}
+        for aff_elem in front_stub.findall("aff"):
+            aff_id = aff_elem.get("id", "")
+            aff_text = all_text(aff_elem)
+            if aff_id and aff_text:
+                aff_map[aff_id] = aff_text
+        for contrib in front_stub.findall(
+            "contrib-group/contrib[@contrib-type='author']"
+        ):
+            author = Author()
+            name_elem = contrib.find("name")
+            if name_elem is not None:
+                author.surname = text(name_elem.find("surname"))
+                author.given_name = text(name_elem.find("given-names"))
+            for role_el in contrib.findall("role"):
+                role_text = all_text(role_el)
+                if role_text:
+                    author.roles.append(role_text)
+            doc.authors.append(author)
+
+        # Also parse editors and other contributors
+        for contrib in front_stub.findall("contrib-group/contrib"):
+            ctype = contrib.get("contrib-type", "")
+            if ctype == "author":
+                continue  # already handled
+            name_elem = contrib.find("name")
+            if name_elem is not None:
+                author = Author()
+                author.surname = text(name_elem.find("surname"))
+                author.given_name = text(name_elem.find("given-names"))
+                doc.authors.append(author)
+
+    # Body
+    doc.sections = _parse_body(sub_el)
+
+    # References within sub-article
+    doc.references = _parse_bibliography(sub_el)
+
+    return doc
+
+
+def _parse_categories(root: etree._Element) -> list[str]:
+    """Extract subject categories from article-categories."""
+    categories: list[str] = []
+    for subj in root.findall(
+        ".//article-meta/article-categories/subj-group/subject"
+    ):
+        subj_text = all_text(subj)
+        if subj_text:
+            categories.append(subj_text)
+    return categories
 
 
 def _parse_affiliations(root: etree._Element) -> dict[str, str]:
@@ -252,6 +389,12 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
             rid = xref.get("rid", "")
             if rid in aff_map:
                 author.affiliations.append(aff_map[rid])
+
+        # CRediT roles from <role> elements
+        for role_el in contrib.findall("role"):
+            role_text = all_text(role_el)
+            if role_text:
+                author.roles.append(role_text)
 
         authors.append(author)
     return authors
@@ -774,8 +917,11 @@ def _parse_glossary(
 
 
 def _parse_acknowledgments(root: etree._Element) -> str:
-    """Extract acknowledgments from //back/ack."""
-    ack = root.find(".//back/ack")
+    """Extract acknowledgments from back/ack."""
+    back = root.find("back")
+    if back is None:
+        back = root.find(".//back")
+    ack = back.find("ack") if back is not None else None
     if ack is None:
         return ""
 
@@ -788,9 +934,12 @@ def _parse_acknowledgments(root: etree._Element) -> str:
 
 
 def _parse_appendices(root: etree._Element) -> list[Section]:
-    """Extract appendices from //back/app-group."""
+    """Extract appendices from back/app-group."""
     sections: list[Section] = []
-    app_group = root.find(".//back/app-group")
+    back = root.find("back")
+    if back is None:
+        back = root.find(".//back")
+    app_group = back.find("app-group") if back is not None else None
     if app_group is None:
         return sections
 
@@ -821,7 +970,9 @@ def _parse_back_sections(root: etree._Element) -> list[Section]:
     contributions, data-availability statements, COI disclosures, etc.
     """
     sections: list[Section] = []
-    back = root.find(".//back")
+    back = root.find("back")
+    if back is None:
+        back = root.find(".//back")
     if back is None:
         return sections
 
@@ -892,11 +1043,19 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
 
 
 def _parse_bibliography(root: etree._Element) -> list[Reference]:
-    """Extract references from //back/ref-list/ref."""
+    """Extract references from back/ref-list/ref.
+
+    Uses the direct ``<back>`` child to avoid picking up references
+    from nested ``<sub-article>`` elements.
+    """
+    back = root.find("back")
+    if back is None:
+        # Fallback for non-standard structure
+        back = root.find(".//back")
+    if back is None:
+        return []
     references = []
-    for idx, ref_elem in enumerate(
-        root.findall(".//back/ref-list/ref")
-    ):
+    for idx, ref_elem in enumerate(back.findall("ref-list/ref")):
         ref = _parse_ref(ref_elem, idx + 1)
         references.append(ref)
     return references

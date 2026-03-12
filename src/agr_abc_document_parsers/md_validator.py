@@ -44,6 +44,7 @@ _RE_TABLE_ROW = re.compile(r"^\|.*\|$")
 _RE_UNORDERED_LIST = re.compile(r"^- ")
 _RE_ORDERED_LIST = re.compile(r"^\d+\.\s")
 _RE_CODE_FENCE = re.compile(r"^`{3,}[^`]*$")
+_RE_HR = re.compile(r"^---\s*$")
 _RE_BLOCK_ELEMENT = re.compile(
     r"^("
     r"#{1,6}\s"           # heading
@@ -75,7 +76,7 @@ def validate_markdown(text: str) -> ValidationResult:
     _check_s02(headings, result)
     _check_s03(headings, result)
     _check_s04(headings, result)
-    _check_s05(headings, result)
+    _check_s05(headings, result, lines=lines)
     _check_s06(headings, result)
     _check_s07(lines, result)
     _check_s08(lines, result)
@@ -185,9 +186,33 @@ def _check_s04(
 
 def _check_s05(
     headings: list[tuple[int, int, str]], result: ValidationResult,
+    lines: list[str] | None = None,
 ) -> None:
-    """S05: ``## References`` is the last H2 section."""
-    h2s = [(ln, txt) for ln, lvl, txt in headings if lvl == 2]
+    """S05: ``## References`` is the last H2 section.
+
+    H2 headings that appear after a ``---`` separator (sub-articles)
+    are excluded from this check.
+    """
+    # Find the first --- separator AFTER the References heading to
+    # determine where sub-articles begin.  A --- before References
+    # is a thematic break in the main article and should be ignored.
+    sub_article_start: int | None = None
+    if lines is not None:
+        refs_line: int | None = None
+        for ln, lvl, txt in headings:
+            if lvl == 2 and txt.strip().lower() == "references":
+                refs_line = ln
+        if refs_line is not None:
+            for i in range(refs_line, len(lines)):
+                if _RE_HR.match(lines[i]):
+                    sub_article_start = i + 1  # 1-based
+                    break
+
+    # Only consider H2s in the main article (before first ---)
+    h2s = [
+        (ln, txt) for ln, lvl, txt in headings
+        if lvl == 2 and (sub_article_start is None or ln < sub_article_start)
+    ]
     if not h2s:
         return
     ref_indices = [

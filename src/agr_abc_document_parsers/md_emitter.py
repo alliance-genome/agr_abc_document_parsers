@@ -26,8 +26,10 @@ def emit_markdown(doc: Document) -> str:
 
     _emit_title(doc, lines)
     _emit_metadata(doc, lines)
+    _emit_categories(doc, lines)
     _emit_authors(doc, lines)
     _emit_abstract(doc, lines)
+    _emit_secondary_abstracts(doc, lines)
     _emit_keywords(doc, lines)
     footnote_counter = [0]  # mutable counter shared across sections
     _emit_sections(doc.sections, lines, base_level=2,
@@ -37,6 +39,8 @@ def emit_markdown(doc: Document) -> str:
     _emit_acknowledgments(doc, lines)
     _emit_back_matter(doc, lines, footnote_counter=footnote_counter)
     _emit_references(doc, lines)
+    _emit_author_roles(doc, lines)
+    _emit_sub_articles(doc, lines)
 
     return "\n".join(lines).rstrip("\n") + "\n"
 
@@ -328,31 +332,103 @@ def _format_ref_source(ref: Reference) -> list[str]:
     return parts
 
 
+def _format_ref_line(ref: Reference) -> str:
+    """Format a single reference as a numbered line."""
+    parts: list[str] = []
+    if ref.authors:
+        parts.append(", ".join(ref.authors))
+    if ref.year:
+        parts.append(f"({ref.year})")
+    if ref.title:
+        parts.append(f"{ref.title}.")
+    if ref.chapter_title:
+        parts.append(f"In: {ref.chapter_title}.")
+    if ref.editors:
+        parts.append(f"Edited by {', '.join(ref.editors)}.")
+    parts.extend(_format_ref_source(ref))
+    if ref.doi:
+        parts.append(f"doi:{ref.doi}")
+    if ref.pmid:
+        parts.append(f"PMID:{ref.pmid}")
+    if ref.pmcid:
+        parts.append(f"PMCID:{ref.pmcid}")
+    for link in ref.ext_links:
+        parts.append(link)
+    return f"{ref.index}. " + " ".join(parts)
+
+
 def _emit_references(doc: Document, lines: list[str]) -> None:
     if not doc.references:
         return
     lines.append("## References")
     lines.append("")
     for ref in doc.references:
-        parts: list[str] = []
-        if ref.authors:
-            parts.append(", ".join(ref.authors))
-        if ref.year:
-            parts.append(f"({ref.year})")
-        if ref.title:
-            parts.append(f"{ref.title}.")
-        if ref.chapter_title:
-            parts.append(f"In: {ref.chapter_title}.")
-        if ref.editors:
-            parts.append(f"Edited by {', '.join(ref.editors)}.")
-        parts.extend(_format_ref_source(ref))
-        if ref.doi:
-            parts.append(f"doi:{ref.doi}")
-        if ref.pmid:
-            parts.append(f"PMID:{ref.pmid}")
-        if ref.pmcid:
-            parts.append(f"PMCID:{ref.pmcid}")
-        for link in ref.ext_links:
-            parts.append(link)
-        lines.append(f"{ref.index}. " + " ".join(parts))
+        lines.append(_format_ref_line(ref))
     lines.append("")
+
+
+def _emit_categories(doc: Document, lines: list[str]) -> None:
+    if not doc.categories:
+        return
+    lines.append(f"**Categories:** {', '.join(doc.categories)}")
+    lines.append("")
+
+
+def _emit_secondary_abstracts(doc: Document, lines: list[str]) -> None:
+    if not doc.secondary_abstracts:
+        return
+    for sa in doc.secondary_abstracts:
+        lines.append(f"## {sa.label}")
+        lines.append("")
+        for para in sa.paragraphs:
+            lines.append(para.text)
+            lines.append("")
+
+
+def _emit_author_roles(doc: Document, lines: list[str]) -> None:
+    """Emit CRediT author roles as footnotes after references."""
+    entries: list[str] = []
+    for author in doc.authors:
+        if author.roles:
+            name = f"{author.given_name} {author.surname}".strip()
+            entries.append(f"{name}: {', '.join(author.roles)}")
+    if not entries:
+        return
+    for i, entry in enumerate(entries, 1):
+        lines.append(f"[^{i}]: {entry}")
+    lines.append("")
+
+
+def _emit_sub_articles(doc: Document, lines: list[str]) -> None:
+    """Emit sub-articles (decision letters, author responses, etc.)."""
+    if not doc.sub_articles:
+        return
+    for sub in doc.sub_articles:
+        _emit_sub_article(sub, lines)
+
+
+def _emit_sub_article(sub: Document, lines: list[str]) -> None:
+    """Emit a single sub-article with ``---`` separator and H2 title."""
+    lines.append("---")
+    lines.append("")
+    if sub.title:
+        lines.append(f"## {sub.title}")
+        lines.append("")
+    if sub.authors:
+        author_parts = []
+        for author in sub.authors:
+            name = f"{author.given_name} {author.surname}".strip()
+            if name:
+                author_parts.append(name)
+        if author_parts:
+            lines.append(", ".join(author_parts))
+            lines.append("")
+    footnote_counter = [0]
+    _emit_sections(sub.sections, lines, base_level=3,
+                   footnote_counter=footnote_counter)
+    if sub.references:
+        lines.append("### References")
+        lines.append("")
+        for ref in sub.references:
+            lines.append(_format_ref_line(ref))
+        lines.append("")

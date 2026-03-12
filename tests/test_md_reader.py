@@ -11,6 +11,7 @@ from agr_abc_document_parsers.models import (
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
     TableCell,
@@ -641,3 +642,224 @@ class TestRoundTripFixtures:
 
     def test_tei_no_abstract_no_doi(self):
         self._assert_fixture_idempotent("tei_no_abstract_no_doi.tei.gz")
+
+
+# ---------------------------------------------------------------------------
+# New feature parsing tests
+# ---------------------------------------------------------------------------
+
+
+class TestReadMarkdownNewFeatures:
+    """Test parsing of secondary abstracts, sub-articles, categories, roles."""
+
+    def test_parse_categories(self):
+        md = (
+            "# Title\n\n"
+            "**Categories:** Research Article, Cell Biology, Genetics\n\n"
+            "Author Name\n\n"
+            "## Abstract\n\nAbstract text.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.categories == ["Research Article", "Cell Biology", "Genetics"]
+        assert doc.title == "Title"
+
+    def test_parse_secondary_abstracts(self):
+        md = (
+            "# Title\n\n"
+            "## Abstract\n\nMain abstract text.\n\n"
+            "## Author Summary\n\nPlain language summary.\n\n"
+            "## eLife Digest\n\nDigest paragraph one.\n\nDigest paragraph two.\n\n"
+            "**Keywords:** kw1, kw2\n\n"
+            "## Introduction\n\nBody text.\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.abstract) == 1
+        assert "Main abstract text" in doc.abstract[0].text
+        assert len(doc.secondary_abstracts) == 2
+        assert doc.secondary_abstracts[0].label == "Author Summary"
+        assert doc.secondary_abstracts[0].abstract_type == "summary"
+        assert len(doc.secondary_abstracts[0].paragraphs) == 1
+        assert doc.secondary_abstracts[1].label == "eLife Digest"
+        assert doc.secondary_abstracts[1].abstract_type == "executive-summary"
+        assert len(doc.secondary_abstracts[1].paragraphs) == 2
+
+    def test_parse_sub_articles(self):
+        md = (
+            "# Title\n\n"
+            "## Abstract\n\nAbstract.\n\n"
+            "## Introduction\n\nBody.\n\n"
+            "## References\n\n1. Main ref (2024) Title. *J*.\n\n"
+            "---\n\n"
+            "## Decision letter\n\n"
+            "Pat Wittkopp, Justin Crocker\n\n"
+            "The reviewers find the paper interesting.\n\n"
+            "---\n\n"
+            "## Author response\n\n"
+            "We thank the reviewers.\n\n"
+            "### References\n\n"
+            "1. Sub ref (2023) Sub title. *J2*.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.title == "Title"
+        assert len(doc.references) == 1
+        assert len(doc.sub_articles) == 2
+
+        dl = doc.sub_articles[0]
+        assert dl.title == "Decision letter"
+        assert len(dl.authors) == 2
+        assert dl.authors[0].given_name == "Pat"
+        assert dl.authors[0].surname == "Wittkopp"
+
+        ar = doc.sub_articles[1]
+        assert ar.title == "Author response"
+        assert len(ar.references) == 1
+        assert ar.references[0].title == "Sub title"
+
+    def test_parse_role_footnotes(self):
+        md = (
+            "# Title\n\n"
+            "Rachel Waymack, Alvaro Fletcher\n\n"
+            "## References\n\n1. Ref (2024) T. *J*.\n\n"
+            "[^1]: Rachel Waymack: Conceptualization, Software\n"
+            "[^2]: Alvaro Fletcher: Investigation\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.authors) == 2
+        assert doc.authors[0].roles == ["Conceptualization", "Software"]
+        assert doc.authors[1].roles == ["Investigation"]
+
+    def test_no_sub_articles_when_none(self):
+        md = (
+            "# Title\n\n"
+            "## References\n\n1. Ref (2024) T. *J*.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.sub_articles == []
+
+
+# ---------------------------------------------------------------------------
+# Round-trip tests for new features
+# ---------------------------------------------------------------------------
+
+
+class TestRoundTripNewFeatures:
+    """Round-trip tests for secondary abstracts, sub-articles, categories, roles."""
+
+    def _assert_round_trip(self, doc: Document) -> None:
+        md1 = emit_markdown(doc)
+        doc2 = read_markdown(md1)
+        md2 = emit_markdown(doc2)
+        assert md1 == md2, (
+            f"Round-trip failed.\n--- Original ---\n{md1}\n"
+            f"--- Round-tripped ---\n{md2}"
+        )
+
+    def test_round_trip_categories(self):
+        self._assert_round_trip(_make_doc(
+            title="Paper",
+            categories=["Research Article", "Cell Biology"],
+            authors=[Author(given_name="A", surname="B")],
+        ))
+
+    def test_round_trip_secondary_abstracts(self):
+        self._assert_round_trip(_make_doc(
+            title="Paper",
+            abstract=[Paragraph(text="Main abstract.")],
+            secondary_abstracts=[
+                SecondaryAbstract(
+                    abstract_type="summary",
+                    label="Author Summary",
+                    paragraphs=[Paragraph(text="Author summary text.")],
+                ),
+                SecondaryAbstract(
+                    abstract_type="executive-summary",
+                    label="eLife Digest",
+                    paragraphs=[
+                        Paragraph(text="Digest paragraph one."),
+                        Paragraph(text="Digest paragraph two."),
+                    ],
+                ),
+            ],
+            keywords=["kw1"],
+        ))
+
+    def test_round_trip_sub_articles(self):
+        self._assert_round_trip(_make_doc(
+            title="Paper",
+            references=[
+                Reference(index=1, authors=["A B"], title="T",
+                          journal="J", year="2024"),
+            ],
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    authors=[Author(given_name="Pat", surname="Wittkopp")],
+                    sections=[Section(heading="Summary", paragraphs=[
+                        Paragraph(text="Interesting paper."),
+                    ])],
+                ),
+                Document(
+                    title="Author response",
+                    sections=[Section(paragraphs=[
+                        Paragraph(text="We thank the reviewers."),
+                    ])],
+                    references=[
+                        Reference(index=1, authors=["X Y"], title="Sub ref",
+                                  journal="J2", year="2023"),
+                    ],
+                ),
+            ],
+        ))
+
+    def test_round_trip_author_roles(self):
+        self._assert_round_trip(_make_doc(
+            title="Paper",
+            authors=[
+                Author(given_name="Rachel", surname="Waymack",
+                       roles=["Conceptualization", "Software"]),
+                Author(given_name="Alvaro", surname="Fletcher",
+                       roles=["Investigation"]),
+            ],
+            references=[
+                Reference(index=1, authors=["A B"], title="T",
+                          journal="J", year="2024"),
+            ],
+        ))
+
+    def test_round_trip_full_with_all_new_features(self):
+        """Full document with all new features."""
+        self._assert_round_trip(Document(
+            title="A Study",
+            categories=["Research Article", "Genetics"],
+            authors=[
+                Author(given_name="Alice", surname="Smith",
+                       roles=["Conceptualization"]),
+                Author(given_name="Bob", surname="Jones"),
+            ],
+            abstract=[Paragraph(text="Main abstract.")],
+            secondary_abstracts=[
+                SecondaryAbstract(
+                    abstract_type="summary",
+                    label="Author Summary",
+                    paragraphs=[Paragraph(text="Summary text.")],
+                ),
+            ],
+            keywords=["gene expression"],
+            sections=[
+                Section(heading="Introduction",
+                        paragraphs=[Paragraph(text="Intro.")]),
+            ],
+            acknowledgments="Thanks.",
+            references=[
+                Reference(index=1, authors=["Lee C"], title="Ref",
+                          journal="Nature", volume="1", year="2020"),
+            ],
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    sections=[Section(heading="Review", paragraphs=[
+                        Paragraph(text="Good work."),
+                    ])],
+                ),
+            ],
+        ))

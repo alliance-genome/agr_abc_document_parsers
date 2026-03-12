@@ -6,6 +6,7 @@ from agr_abc_document_parsers.models import (
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
 )
@@ -427,3 +428,58 @@ class TestPlainTextFixtures:
         # But full text should still work
         text = extract_plain_text(doc)
         assert len(text) > 50
+
+
+# ---------------------------------------------------------------------------
+# Secondary abstracts and sub-articles
+# ---------------------------------------------------------------------------
+
+
+class TestPlainTextNewFeatures:
+    """Tests for secondary abstract and sub-article handling."""
+
+    def test_secondary_abstracts_included(self):
+        doc = Document(
+            title="Paper",
+            secondary_abstracts=[
+                SecondaryAbstract(
+                    abstract_type="summary",
+                    label="Author Summary",
+                    paragraphs=[Paragraph(text="Plain language summary.")],
+                ),
+            ],
+        )
+        result = extract_plain_text(doc)
+        assert "Author Summary" in result
+        assert "Plain language summary." in result
+
+    def test_sub_articles_excluded_by_default(self):
+        doc = Document(
+            title="Paper",
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    sections=[Section(heading="Review", paragraphs=[
+                        Paragraph(text="Reviewer comment."),
+                    ])],
+                ),
+            ],
+        )
+        result = extract_plain_text(doc)
+        assert "Paper" in result
+        assert "Reviewer comment." not in result
+
+    def test_sub_articles_included_when_requested(self):
+        doc = Document(
+            title="Paper",
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    sections=[Section(heading="Review", paragraphs=[
+                        Paragraph(text="Reviewer comment."),
+                    ])],
+                ),
+            ],
+        )
+        result = extract_plain_text(doc, include_sub_articles=True)
+        assert "Reviewer comment." in result

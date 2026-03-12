@@ -287,3 +287,62 @@ class TestCodeFenceInteraction:
         md = "# Title\n\n| L | C | R |\n|:---|:---:|---:|\n| a | b | c |\n"
         result = validate_markdown(md)
         assert "S07" not in _ids(result)
+
+
+# -- S05 with sub-articles ------------------------------------------------
+
+class TestS05WithSubArticles:
+    """S05 should not flag H2 headings in sub-articles."""
+
+    def test_sub_article_h2_after_refs_ok(self):
+        """H2 headings after --- (sub-articles) don't violate S05."""
+        md = (
+            "# Title\n\n"
+            "## Abstract\n\nText.\n\n"
+            "## References\n\n1. Ref.\n\n"
+            "---\n\n"
+            "## Decision letter\n\nReview text.\n\n"
+            "---\n\n"
+            "## Author response\n\nResponse text.\n"
+        )
+        result = validate_markdown(md)
+        assert "S05" not in _ids(result)
+
+    def test_thematic_break_before_refs_still_flags(self):
+        """A --- before References should not suppress S05."""
+        md = (
+            "# Title\n\n"
+            "---\n\n"
+            "## References\n\n1. Ref.\n\n"
+            "## Appendix\n\nText.\n"
+        )
+        result = validate_markdown(md)
+        assert "S05" in _ids(result)
+
+    def test_sub_article_with_validator_round_trip(self):
+        """Full emitted document with sub-articles passes validation."""
+        doc = Document(
+            title="Study",
+            abstract=[Paragraph(text="Abstract.")],
+            sections=[Section(heading="Introduction", level=1,
+                              paragraphs=[Paragraph(text="Body.")])],
+            references=[
+                Reference(index=1, authors=["A B"], title="T",
+                          journal="J", year="2024"),
+            ],
+            sub_articles=[
+                Document(
+                    title="Decision letter",
+                    sections=[Section(paragraphs=[
+                        Paragraph(text="Review."),
+                    ])],
+                ),
+            ],
+        )
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        md = emit_markdown(doc)
+        result = validate_markdown(md)
+        assert result.valid, (
+            f"Validation failed: errors={[e.message for e in result.errors]}"
+        )
+        assert "S05" not in _ids(result)

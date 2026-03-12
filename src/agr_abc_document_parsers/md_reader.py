@@ -10,6 +10,7 @@ from agr_abc_document_parsers.models import (
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
     TableCell,
@@ -33,6 +34,9 @@ _TABLE_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+)$")
+_CATEGORIES_RE = re.compile(r"^\*\*Categories:\*\*\s*(.+)$")
+_ROLE_FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+?):\s+(.+)$")
+_HR_RE = re.compile(r"^---\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(\d+)\.\s+(.+)$")
 _REF_LINE_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _GFM_SEP_RE = re.compile(r"^\|[-:| ]+\|$")
@@ -84,6 +88,16 @@ def read_markdown(text: str) -> Document:
         else:
             break
 
+    # --- Categories line (**Categories:** ...) ---
+    if pos < n and _CATEGORIES_RE.match(lines[pos]):
+        m_cat = _CATEGORIES_RE.match(lines[pos])
+        if m_cat:
+            doc.categories = [
+                c.strip() for c in m_cat.group(1).split(",") if c.strip()
+            ]
+        pos += 1
+        pos = _skip_blank(lines, pos, n)
+
     # --- Author line (non-heading, non-keyword, non-bold-label before first H2) ---
     if (
         pos < n
@@ -120,8 +134,18 @@ def read_markdown(text: str) -> Document:
         if section.paragraphs or section.figures or section.tables or section.lists:
             doc.sections.append(section)
 
-    # --- H2+ sections ---
-    h2_blocks = _collect_h2_blocks(lines, pos, n)
+    # --- Split main article from sub-articles at --- separators ---
+    main_lines, sub_article_chunks = _split_sub_articles(lines, pos, n)
+    main_n = len(main_lines)
+
+    # --- H2+ sections (main article only) ---
+    h2_blocks = _collect_h2_blocks(main_lines, pos, main_n)
+
+    # Known secondary abstract labels
+    _SECONDARY_LABELS = {
+        "Author Summary", "eLife Digest",
+        "Table of Contents Summary", "Plain Language Summary",
+    }
 
     found_ack = False
     found_ref = False
@@ -130,6 +154,22 @@ def read_markdown(text: str) -> Document:
             doc.abstract, kw = _parse_abstract_lines(content_lines)
             if kw and not doc.keywords:
                 doc.keywords = kw
+        elif (
+            heading in _SECONDARY_LABELS
+            and not found_ack
+            and not found_ref
+        ):
+            # Extract keywords that may be embedded in this block
+            for cl in content_lines:
+                m_kw = _KEYWORDS_RE.match(cl)
+                if m_kw and not doc.keywords:
+                    doc.keywords = [
+                        k.strip() for k in m_kw.group(1).split(",")
+                        if k.strip()
+                    ]
+            doc.secondary_abstracts.append(
+                _parse_secondary_abstract(heading, content_lines)
+            )
         elif heading == "Acknowledgments":
             doc.acknowledgments = _parse_acknowledgments_lines(content_lines)
             found_ack = True
@@ -139,7 +179,6 @@ def read_markdown(text: str) -> Document:
                 doc.references = refs
                 found_ref = True
             elif found_ack:
-                # Empty ## References from back_matter — preserve as section
                 doc.back_matter.append(
                     _parse_section_lines(heading, content_lines, 2)
                 )
@@ -151,6 +190,14 @@ def read_markdown(text: str) -> Document:
             doc.sections.append(
                 _parse_section_lines(heading, content_lines, 2)
             )
+
+    # --- Role footnotes (after references, before sub-articles) ---
+    _parse_role_footnotes(main_lines, pos, main_n, doc)
+
+    # --- Sub-articles ---
+    for chunk_lines in sub_article_chunks:
+        sub_doc = _parse_sub_article_chunk(chunk_lines)
+        doc.sub_articles.append(sub_doc)
 
     return doc
 
@@ -173,6 +220,182 @@ def load_document_with_supplements(
         for supp_md in supplement_mds:
             doc.supplements.append(read_markdown(supp_md))
     return doc
+
+
+def _split_sub_articles(
+    lines: list[str], start: int, end: int,
+) -> tuple[list[str], list[list[str]]]:
+    """Split document lines into main-article lines and sub-article chunks.
+
+    Sub-articles are delimited by ``---`` followed by ``## Title``.
+    Returns (main_lines, [sub_chunk1_lines, sub_chunk2_lines, ...]).
+    """
+    # Find the References section first — sub-articles only appear after it
+    refs_line = None
+    for i in range(start, end):
+        if _heading_level(lines[i]) == 2 and _heading_text(lines[i]) == "References":
+            refs_line = i
+    if refs_line is None:
+        return lines[:end], []
+
+    # Scan after References for --- separators followed by ## heading
+    sub_starts: list[int] = []
+    i = refs_line
+    while i < end:
+        if _HR_RE.match(lines[i]):
+            # Look ahead for an H2 heading after optional blanks
+            j = i + 1
+            while j < end and not lines[j].strip():
+                j += 1
+            if j < end and _heading_level(lines[j]) == 2:
+                sub_starts.append(i)
+        i += 1
+
+    if not sub_starts:
+        return lines[:end], []
+
+    main_lines = lines[:sub_starts[0]]
+    # Strip trailing blank lines from main
+    while main_lines and not main_lines[-1].strip():
+        main_lines.pop()
+
+    sub_chunks: list[list[str]] = []
+    for idx, s in enumerate(sub_starts):
+        chunk_end = sub_starts[idx + 1] if idx + 1 < len(sub_starts) else end
+        sub_chunks.append(lines[s:chunk_end])
+
+    return main_lines, sub_chunks
+
+
+def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
+    """Parse a sub-article chunk (starting with ``---``) into a Document."""
+    doc = Document()
+    n = len(chunk_lines)
+    pos = 0
+
+    # Skip --- separator
+    if pos < n and _HR_RE.match(chunk_lines[pos]):
+        pos += 1
+    pos = _skip_blank(chunk_lines, pos, n)
+
+    # Title (H2)
+    if pos < n and _heading_level(chunk_lines[pos]) == 2:
+        doc.title = _heading_text(chunk_lines[pos])
+        pos += 1
+        pos = _skip_blank(chunk_lines, pos, n)
+
+    # Optional author line (non-heading, non-H3)
+    if (
+        pos < n
+        and _heading_level(chunk_lines[pos]) == 0
+        and chunk_lines[pos].strip()
+        and not chunk_lines[pos].startswith("|")
+        and not chunk_lines[pos].startswith("- ")
+        and not chunk_lines[pos].startswith("> ")
+        and not _FOOTNOTE_RE.match(chunk_lines[pos])
+        and not _BOLD_LABEL_RE.match(chunk_lines[pos])
+    ):
+        doc.authors = _parse_author_line(chunk_lines[pos])
+        pos += 1
+        pos = _skip_blank(chunk_lines, pos, n)
+
+    # Collect H3 blocks for body and references
+    h3_blocks: list[tuple[str, list[str]]] = []
+    body_lines: list[str] = []
+
+    # Collect content: everything at H3+ level
+    while pos < n:
+        line = chunk_lines[pos]
+        hlevel = _heading_level(line)
+        if hlevel == 3:
+            heading = _heading_text(line)
+            pos += 1
+            content_start = pos
+            while pos < n:
+                hl = _heading_level(chunk_lines[pos])
+                if hl > 0 and hl <= 3:
+                    break
+                pos += 1
+            h3_blocks.append((heading, chunk_lines[content_start:pos]))
+        elif hlevel > 0 and hlevel > 3:
+            # Sub-subsection within body
+            body_lines.append(line)
+            pos += 1
+        else:
+            body_lines.append(line)
+            pos += 1
+
+    # Parse body lines as a single section (no heading)
+    if body_lines:
+        sec = _parse_section_lines("", body_lines, 3)
+        if sec.paragraphs or sec.figures or sec.tables or sec.lists:
+            doc.sections.append(sec)
+
+    # Parse H3 blocks
+    for heading, content in h3_blocks:
+        if heading == "References":
+            doc.references = _parse_references_lines(content)
+        else:
+            doc.sections.append(_parse_section_lines(heading, content, 3))
+
+    return doc
+
+
+def _parse_secondary_abstract(
+    heading: str, content_lines: list[str],
+) -> SecondaryAbstract:
+    """Parse a secondary abstract H2 block into a SecondaryAbstract."""
+    _LABEL_TO_TYPE = {
+        "Author Summary": "summary",
+        "eLife Digest": "executive-summary",
+        "Table of Contents Summary": "toc",
+        "Plain Language Summary": "plain-language-summary",
+    }
+    ab_type = _LABEL_TO_TYPE.get(heading, heading.lower().replace(" ", "-"))
+    paragraphs: list[Paragraph] = []
+    for line in content_lines:
+        if not line.strip():
+            continue
+        # Skip Keywords line that may fall within this block
+        if _KEYWORDS_RE.match(line):
+            continue
+        paragraphs.append(Paragraph(text=line))
+    return SecondaryAbstract(
+        abstract_type=ab_type,
+        label=heading,
+        paragraphs=paragraphs,
+    )
+
+
+def _parse_role_footnotes(
+    lines: list[str], start: int, end: int, doc: Document,
+) -> None:
+    """Parse author role footnotes back into Author.roles.
+
+    Footnotes matching ``[^N]: Name: Role1, Role2`` after the References
+    section are parsed and matched to authors by name.
+    """
+    # Find references section end
+    refs_line = None
+    for i in range(start, end):
+        if _heading_level(lines[i]) == 2 and _heading_text(lines[i]) == "References":
+            refs_line = i
+            break
+    if refs_line is None:
+        return
+
+    # Scan lines after references for role footnotes
+    for i in range(refs_line, end):
+        m = _ROLE_FOOTNOTE_RE.match(lines[i])
+        if m:
+            fn_name = m.group(2).strip()
+            roles = [r.strip() for r in m.group(3).split(",") if r.strip()]
+            # Match to author
+            for author in doc.authors:
+                author_name = f"{author.given_name} {author.surname}".strip()
+                if author_name == fn_name:
+                    author.roles = roles
+                    break
 
 
 def _apply_metadata(doc: Document, key: str, value: str) -> None:

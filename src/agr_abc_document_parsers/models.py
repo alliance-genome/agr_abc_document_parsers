@@ -21,6 +21,7 @@ class Author:
     email: str = ""
     orcid: str = ""
     affiliations: list[str] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)  # CRediT roles
 
 
 @dataclass
@@ -67,6 +68,13 @@ class Formula:
 class ListBlock:
     items: list[str] = field(default_factory=list)
     ordered: bool = False
+
+
+@dataclass
+class SecondaryAbstract:
+    abstract_type: str = ""   # "summary", "executive-summary", "toc", etc.
+    label: str = ""           # "Author Summary", "eLife Digest", etc.
+    paragraphs: list[Paragraph] = field(default_factory=list)
 
 
 @dataclass
@@ -128,6 +136,10 @@ class Document:
     back_matter: list[Section] = field(default_factory=list)
     source_format: str = ""  # "tei" or "jats"
     supplements: list[Document] = field(default_factory=list)
+    secondary_abstracts: list[SecondaryAbstract] = field(default_factory=list)
+    sub_articles: list[Document] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    article_type: str = ""  # e.g., "decision-letter", "reply", "editor-report"
 
     # -- Loading methods ---------------------------------------------------
 

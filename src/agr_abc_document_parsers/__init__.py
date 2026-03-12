@@ -30,6 +30,7 @@ from agr_abc_document_parsers.models import (  # noqa: F401
     ListBlock,
     Paragraph,
     Reference,
+    SecondaryAbstract,
     Section,
     Table,
     TableCell,

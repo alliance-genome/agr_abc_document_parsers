@@ -1082,3 +1082,258 @@ class TestJatsParser:
         assert "\n" not in para
         assert "  " not in para
         assert "Text with [1] and more text." == para
+
+
+# -- Secondary abstracts, sub-articles, categories, roles ------------------
+
+SECONDARY_ABSTRACTS_JATS = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<article article-type="research-article">
+  <front>
+    <article-meta>
+      <title-group>
+        <article-title>Paper With Secondary Abstracts</article-title>
+      </title-group>
+      <abstract>
+        <p>Main abstract paragraph.</p>
+      </abstract>
+      <abstract abstract-type="summary">
+        <title>Author Summary</title>
+        <p>Plain language summary of the paper.</p>
+      </abstract>
+      <abstract abstract-type="executive-summary">
+        <p>Digest paragraph one.</p>
+        <p>Digest paragraph two.</p>
+      </abstract>
+    </article-meta>
+  </front>
+  <body>
+    <sec><title>Intro</title><p>Body.</p></sec>
+  </body>
+  <back><ref-list/></back>
+</article>
+"""
+
+SUB_ARTICLES_JATS = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<article article-type="research-article">
+  <front>
+    <article-meta>
+      <title-group>
+        <article-title>Main Paper Title</article-title>
+      </title-group>
+      <abstract><p>Main abstract.</p></abstract>
+    </article-meta>
+  </front>
+  <body>
+    <sec><title>Introduction</title><p>Main body.</p></sec>
+  </body>
+  <back>
+    <ref-list>
+      <ref id="r1">
+        <element-citation>
+          <article-title>Main ref</article-title>
+          <year>2024</year>
+        </element-citation>
+      </ref>
+    </ref-list>
+  </back>
+  <sub-article article-type="decision-letter">
+    <front-stub>
+      <title-group>
+        <article-title>Decision letter</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <name><surname>Wittkopp</surname><given-names>Patricia J</given-names></name>
+          <role>Reviewing Editor</role>
+        </contrib>
+      </contrib-group>
+    </front-stub>
+    <body>
+      <sec><title>Summary</title><p>The reviewers find the paper interesting.</p></sec>
+    </body>
+  </sub-article>
+  <sub-article article-type="reply">
+    <front-stub>
+      <title-group>
+        <article-title>Author response</article-title>
+      </title-group>
+    </front-stub>
+    <body>
+      <p>We thank the reviewers for their comments.</p>
+    </body>
+    <back>
+      <ref-list>
+        <ref id="sr1">
+          <element-citation>
+            <article-title>Sub-article ref</article-title>
+            <year>2023</year>
+          </element-citation>
+        </ref>
+      </ref-list>
+    </back>
+  </sub-article>
+</article>
+"""
+
+CATEGORIES_JATS = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<article article-type="research-article">
+  <front>
+    <article-meta>
+      <article-categories>
+        <subj-group subj-group-type="heading">
+          <subject>Research Article</subject>
+        </subj-group>
+        <subj-group subj-group-type="discipline">
+          <subject>Cell Biology</subject>
+          <subject>Genetics</subject>
+        </subj-group>
+      </article-categories>
+      <title-group>
+        <article-title>Paper With Categories</article-title>
+      </title-group>
+      <abstract><p>Abstract.</p></abstract>
+    </article-meta>
+  </front>
+  <body>
+    <sec><title>Intro</title><p>Body.</p></sec>
+  </body>
+  <back><ref-list/></back>
+</article>
+"""
+
+AUTHOR_ROLES_JATS = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<article article-type="research-article">
+  <front>
+    <article-meta>
+      <title-group>
+        <article-title>Paper With Author Roles</article-title>
+      </title-group>
+      <contrib-group>
+        <contrib contrib-type="author">
+          <name><surname>Waymack</surname><given-names>Rachel</given-names></name>
+          <role>Conceptualization</role>
+          <role>Software</role>
+          <role>Formal analysis</role>
+        </contrib>
+        <contrib contrib-type="author">
+          <name><surname>Fletcher</surname><given-names>Alvaro</given-names></name>
+          <role>Investigation</role>
+        </contrib>
+        <contrib contrib-type="author">
+          <name><surname>Smith</surname><given-names>Jane</given-names></name>
+        </contrib>
+      </contrib-group>
+      <abstract><p>Abstract.</p></abstract>
+    </article-meta>
+  </front>
+  <body>
+    <sec><title>Intro</title><p>Body.</p></sec>
+  </body>
+  <back><ref-list/></back>
+</article>
+"""
+
+
+class TestJatsSecondaryAbstracts:
+    """Tests for secondary abstract parsing."""
+
+    def test_parse_secondary_abstracts(self):
+        doc = parse_jats(SECONDARY_ABSTRACTS_JATS)
+        assert len(doc.secondary_abstracts) == 2
+        sa0 = doc.secondary_abstracts[0]
+        assert sa0.abstract_type == "summary"
+        assert sa0.label == "Author Summary"
+        assert len(sa0.paragraphs) == 1
+        assert "Plain language summary" in sa0.paragraphs[0].text
+
+        sa1 = doc.secondary_abstracts[1]
+        assert sa1.abstract_type == "executive-summary"
+        assert sa1.label == "eLife Digest"
+        assert len(sa1.paragraphs) == 2
+
+    def test_parse_main_abstract_excludes_secondary(self):
+        doc = parse_jats(SECONDARY_ABSTRACTS_JATS)
+        assert len(doc.abstract) == 1
+        assert "Main abstract paragraph" in doc.abstract[0].text
+
+    def test_all_abstracts_typed_fallback(self):
+        """When all abstracts have a type, first is used as main."""
+        jats = b"""\
+<?xml version="1.0" encoding="UTF-8"?>
+<article><front><article-meta>
+  <title-group><article-title>T</article-title></title-group>
+  <abstract abstract-type="summary"><p>Summary text.</p></abstract>
+  <abstract abstract-type="toc"><p>TOC text.</p></abstract>
+</article-meta></front>
+<body><sec><title>I</title><p>X.</p></sec></body></article>
+"""
+        doc = parse_jats(jats)
+        # First abstract used as main
+        assert len(doc.abstract) == 1
+        assert "Summary text" in doc.abstract[0].text
+        # Only the second becomes secondary (first is excluded)
+        assert len(doc.secondary_abstracts) == 1
+        assert doc.secondary_abstracts[0].abstract_type == "toc"
+
+
+class TestJatsSubArticles:
+    """Tests for sub-article parsing."""
+
+    def test_parse_sub_articles(self):
+        doc = parse_jats(SUB_ARTICLES_JATS)
+        assert len(doc.sub_articles) == 2
+
+        dl = doc.sub_articles[0]
+        assert dl.title == "Decision letter"
+        assert dl.article_type == "decision-letter"
+        assert len(dl.authors) >= 1
+        assert dl.authors[0].surname == "Wittkopp"
+        assert len(dl.sections) >= 1
+
+        ar = doc.sub_articles[1]
+        assert ar.title == "Author response"
+        assert ar.article_type == "reply"
+        assert len(ar.references) == 1
+        assert ar.references[0].title == "Sub-article ref"
+
+    def test_parse_sub_article_front_stub(self):
+        """Front-stub metadata extracted correctly."""
+        doc = parse_jats(SUB_ARTICLES_JATS)
+        dl = doc.sub_articles[0]
+        # Editor roles parsed
+        assert any("Reviewing Editor" in r for a in dl.authors for r in a.roles)
+
+    def test_main_article_unaffected(self):
+        """Sub-articles don't contaminate main document."""
+        doc = parse_jats(SUB_ARTICLES_JATS)
+        assert doc.title == "Main Paper Title"
+        assert len(doc.references) == 1
+        assert doc.references[0].title == "Main ref"
+
+
+class TestJatsCategories:
+    """Tests for category parsing."""
+
+    def test_parse_categories(self):
+        doc = parse_jats(CATEGORIES_JATS)
+        assert "Research Article" in doc.categories
+        assert "Cell Biology" in doc.categories
+        assert "Genetics" in doc.categories
+        assert len(doc.categories) == 3
+
+
+class TestJatsAuthorRoles:
+    """Tests for CRediT author role parsing."""
+
+    def test_parse_author_roles(self):
+        doc = parse_jats(AUTHOR_ROLES_JATS)
+        assert len(doc.authors) == 3
+        assert doc.authors[0].roles == [
+            "Conceptualization", "Software", "Formal analysis",
+        ]
+        assert doc.authors[1].roles == ["Investigation"]
+        assert doc.authors[2].roles == []

@@ -55,18 +55,21 @@ def extract_plain_text(
     doc: Document,
     include_supplements: bool = True,
     include_metadata: bool = False,
+    include_sub_articles: bool = False,
 ) -> str:
     """Extract plain text from a Document, stripping Markdown formatting.
 
-    Returns title + abstract + body sections + acknowledgments +
-    supplement text (excluding References). Supplements are included
-    by default.
+    Returns title + abstract + secondary abstracts + body sections +
+    acknowledgments + supplement text (excluding References).
+    Supplements are included by default; sub-articles excluded by default.
 
     Args:
         doc: A populated Document model.
         include_supplements: Whether to include supplement text.
         include_metadata: Whether to include article metadata
             (journal, DOI, PMID, etc.).
+        include_sub_articles: Whether to include sub-article text
+            (e.g., decision letters, author responses).
 
     Returns:
         Plain text with double-newline paragraph separation.
@@ -94,6 +97,12 @@ def extract_plain_text(
     for para in doc.abstract:
         parts.append(strip_markdown_formatting(para.text))
 
+    for sa in doc.secondary_abstracts:
+        if sa.label:
+            parts.append(strip_markdown_formatting(sa.label))
+        for para in sa.paragraphs:
+            parts.append(strip_markdown_formatting(para.text))
+
     _collect_sections_text(doc.sections, parts)
 
     for fig in doc.figures:
@@ -110,6 +119,14 @@ def extract_plain_text(
             supp_text = extract_plain_text(supp, include_supplements=False)
             if supp_text:
                 parts.append(supp_text)
+
+    if include_sub_articles:
+        for sub in doc.sub_articles:
+            sub_text = extract_plain_text(
+                sub, include_supplements=False, include_sub_articles=False,
+            )
+            if sub_text:
+                parts.append(sub_text)
 
     return "\n\n".join(p for p in parts if p)
 
