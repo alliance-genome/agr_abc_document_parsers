@@ -25,6 +25,7 @@ env/
 .coverage
 htmlcov/
 .mypy_cache/
+tests/.pmcdata/
 
 # OS
 .DS_Store

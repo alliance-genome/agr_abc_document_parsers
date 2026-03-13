@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agr-abc-document-parsers"
-version = "1.2.0"
+version = "1.2.1"
 description = "Shared parsers, emitters, and validators for the AGR ABC Markdown document format"
 readme = "README.md"
 license = "MIT"
@@ -92,6 +92,8 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["webtest: tests that require network access to PMC (deselected by default)"]
+addopts = "-m 'not webtest'"
 
 [tool.coverage.run]
 source = ["src/agr_abc_document_parsers"]

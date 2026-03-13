@@ -112,6 +112,15 @@ def extract_plain_text(
     if doc.acknowledgments:
         parts.append(strip_markdown_formatting(doc.acknowledgments))
 
+    if doc.funding_statement:
+        parts.append(strip_markdown_formatting(doc.funding_statement))
+    for note in doc.author_notes:
+        parts.append(strip_markdown_formatting(note))
+    if doc.competing_interests:
+        parts.append(strip_markdown_formatting(doc.competing_interests))
+    if doc.data_availability:
+        parts.append(strip_markdown_formatting(doc.data_availability))
+
     _collect_sections_text(doc.back_matter, parts)
 
     if include_supplements:

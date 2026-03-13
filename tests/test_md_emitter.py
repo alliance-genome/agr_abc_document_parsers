@@ -6,6 +6,7 @@ from agr_abc_document_parsers.models import (
     Document,
     Figure,
     Formula,
+    FundingEntry,
     ListBlock,
     Paragraph,
     Reference,
@@ -485,3 +486,111 @@ class TestMdEmitterNewFeatures:
         result = validate_markdown(md)
         s01_errors = [e for e in result.errors if e.rule_id == "S01"]
         assert len(s01_errors) == 0
+
+
+class TestMdEmitterNewSections:
+    """Tests for funding, author notes, competing interests, data availability."""
+
+    def test_emit_funding(self):
+        doc = _make_doc(
+            title="Paper",
+            funding=[
+                FundingEntry(funder="NIH", award_ids=["R01GM12345"]),
+                FundingEntry(funder="Wellcome", award_ids=["098765", "054321"]),
+            ],
+            funding_statement="This work was supported by grants.",
+        )
+        md = emit_markdown(doc)
+        assert "## Funding" in md
+        assert "NIH: R01GM12345" in md
+        assert "Wellcome: 098765, 054321" in md
+        assert "This work was supported by grants." in md
+
+    def test_emit_funding_statement_only(self):
+        doc = _make_doc(
+            title="Paper",
+            funding_statement="This work was supported by the NIH.",
+        )
+        md = emit_markdown(doc)
+        assert "## Funding" in md
+        assert "This work was supported by the NIH." in md
+
+    def test_emit_funding_entries_only(self):
+        doc = _make_doc(
+            title="Paper",
+            funding=[FundingEntry(funder="NSF", award_ids=["DBI-123"])],
+        )
+        md = emit_markdown(doc)
+        assert "## Funding" in md
+        assert "NSF: DBI-123" in md
+
+    def test_emit_no_funding(self):
+        doc = _make_doc(title="Paper")
+        md = emit_markdown(doc)
+        assert "## Funding" not in md
+
+    def test_emit_author_notes(self):
+        doc = _make_doc(
+            title="Paper",
+            author_notes=[
+                "Corresponding author: foo@bar.edu",
+                "These authors contributed equally.",
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "## Author Notes" in md
+        assert "foo@bar.edu" in md
+        assert "contributed equally" in md
+
+    def test_emit_no_author_notes(self):
+        doc = _make_doc(title="Paper")
+        md = emit_markdown(doc)
+        assert "## Author Notes" not in md
+
+    def test_emit_competing_interests(self):
+        doc = _make_doc(
+            title="Paper",
+            competing_interests="The authors declare no competing interests.",
+        )
+        md = emit_markdown(doc)
+        assert "## Competing Interests" in md
+        assert "no competing interests" in md
+
+    def test_emit_no_competing_interests(self):
+        doc = _make_doc(title="Paper")
+        md = emit_markdown(doc)
+        assert "## Competing Interests" not in md
+
+    def test_emit_data_availability(self):
+        doc = _make_doc(
+            title="Paper",
+            data_availability="All data at https://example.com.",
+        )
+        md = emit_markdown(doc)
+        assert "## Data Availability" in md
+        assert "https://example.com" in md
+
+    def test_emit_no_data_availability(self):
+        doc = _make_doc(title="Paper")
+        md = emit_markdown(doc)
+        assert "## Data Availability" not in md
+
+    def test_new_sections_before_references(self):
+        """New sections appear between Acknowledgments and References."""
+        doc = _make_doc(
+            title="Paper",
+            acknowledgments="Thanks.",
+            funding_statement="Funded.",
+            competing_interests="None.",
+            references=[Reference(index=1, authors=["A B"],
+                                  title="T", journal="J", year="2024")],
+        )
+        md = emit_markdown(doc)
+        lines = md.split("\n")
+        ack_idx = next(i for i, ln in enumerate(lines)
+                       if "## Acknowledgments" in ln)
+        fund_idx = next(i for i, ln in enumerate(lines)
+                        if "## Funding" in ln)
+        ref_idx = next(i for i, ln in enumerate(lines)
+                       if "## References" in ln)
+        assert ack_idx < fund_idx < ref_idx

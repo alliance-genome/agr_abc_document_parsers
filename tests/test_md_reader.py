@@ -8,6 +8,7 @@ from agr_abc_document_parsers.models import (
     Author,
     Document,
     Figure,
+    FundingEntry,
     ListBlock,
     Paragraph,
     Reference,
@@ -254,14 +255,14 @@ class TestReadMarkdownBasic:
         md = (
             "## Introduction\n\nText.\n\n"
             "## Acknowledgments\n\nThanks.\n\n"
-            "## Funding\n\nNIH grant.\n\n"
+            "## Appendix\n\nExtra content.\n\n"
             "## References\n\n1. Ref (2024) Title. *J*.\n"
         )
         doc = read_markdown(md)
         assert doc.acknowledgments == "Thanks."
         assert len(doc.back_matter) == 1
-        assert doc.back_matter[0].heading == "Funding"
-        assert doc.back_matter[0].paragraphs[0].text == "NIH grant."
+        assert doc.back_matter[0].heading == "Appendix"
+        assert doc.back_matter[0].paragraphs[0].text == "Extra content."
 
     def test_escaped_pipe_in_table(self):
         md = (
@@ -850,6 +851,13 @@ class TestRoundTripNewFeatures:
                         paragraphs=[Paragraph(text="Intro.")]),
             ],
             acknowledgments="Thanks.",
+            funding=[
+                FundingEntry(funder="NIH", award_ids=["R01GM12345"]),
+            ],
+            funding_statement="Supported by NIH.",
+            author_notes=["Corresponding author: a@b.edu"],
+            competing_interests="No competing interests.",
+            data_availability="Data at GEO.",
             references=[
                 Reference(index=1, authors=["Lee C"], title="Ref",
                           journal="Nature", volume="1", year="2020"),
@@ -863,3 +871,98 @@ class TestRoundTripNewFeatures:
                 ),
             ],
         ))
+
+
+class TestReadMarkdownNewFields:
+    """Tests for reading funding, author notes, competing interests, data availability."""
+
+    def test_read_funding(self):
+        md = (
+            "# Paper\n\n"
+            "## Funding\n\n"
+            "NIH: R01GM12345\n"
+            "Wellcome: 098765, 054321\n\n"
+            "This work was supported by grants.\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.funding) == 2
+        assert doc.funding[0].funder == "NIH"
+        assert doc.funding[0].award_ids == ["R01GM12345"]
+        assert doc.funding[1].funder == "Wellcome"
+        assert doc.funding[1].award_ids == ["098765", "054321"]
+        assert doc.funding_statement == "This work was supported by grants."
+
+    def test_read_funding_statement_only(self):
+        md = (
+            "# Paper\n\n"
+            "## Funding\n\n"
+            "This work was supported by the NIH.\n"
+        )
+        doc = read_markdown(md)
+        assert not doc.funding
+        assert doc.funding_statement == "This work was supported by the NIH."
+
+    def test_read_author_notes(self):
+        md = (
+            "# Paper\n\n"
+            "## Author Notes\n\n"
+            "Corresponding author: foo@bar.edu\n\n"
+            "These authors contributed equally.\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.author_notes) == 2
+        assert "foo@bar.edu" in doc.author_notes[0]
+        assert "contributed equally" in doc.author_notes[1]
+
+    def test_read_competing_interests(self):
+        md = (
+            "# Paper\n\n"
+            "## Competing Interests\n\n"
+            "The authors declare no competing interests.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.competing_interests == "The authors declare no competing interests."
+
+    def test_read_data_availability(self):
+        md = (
+            "# Paper\n\n"
+            "## Data Availability\n\n"
+            "All data at https://example.com.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.data_availability == "All data at https://example.com."
+
+    def test_round_trip_funding(self):
+        doc = _make_doc(
+            title="Paper",
+            funding=[
+                FundingEntry(funder="NIH", award_ids=["R01GM12345"]),
+                FundingEntry(funder="Wellcome", award_ids=["098765", "054321"]),
+            ],
+            funding_statement="This work was supported by grants.",
+        )
+        md = emit_markdown(doc)
+        doc2 = read_markdown(md)
+        assert len(doc2.funding) == 2
+        assert doc2.funding[0].funder == "NIH"
+        assert doc2.funding[0].award_ids == ["R01GM12345"]
+        assert doc2.funding[1].funder == "Wellcome"
+        assert doc2.funding[1].award_ids == ["098765", "054321"]
+        assert doc2.funding_statement == "This work was supported by grants."
+
+    def test_round_trip_all_new_fields(self):
+        doc = _make_doc(
+            title="Paper",
+            acknowledgments="Thanks.",
+            funding=[FundingEntry(funder="NSF", award_ids=["DBI-123"])],
+            funding_statement="Funded by NSF.",
+            author_notes=["Corresponding: a@b.edu"],
+            competing_interests="None declared.",
+            data_availability="Data at GEO.",
+            references=[Reference(index=1, authors=["A B"],
+                                  title="T", journal="J", year="2024")],
+        )
+        md1 = emit_markdown(doc)
+        doc2 = read_markdown(md1)
+        md2 = emit_markdown(doc2)
+        assert md1 == md2

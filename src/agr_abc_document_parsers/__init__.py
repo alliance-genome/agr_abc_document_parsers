@@ -26,6 +26,7 @@ from agr_abc_document_parsers.models import (  # noqa: F401
     Document,
     Figure,
     Formula,
+    FundingEntry,
     InlineRef,
     ListBlock,
     Paragraph,

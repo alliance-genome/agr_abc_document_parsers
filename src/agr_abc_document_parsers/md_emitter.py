@@ -37,6 +37,10 @@ def emit_markdown(doc: Document) -> str:
     _emit_doc_level_figures(doc, lines)
     _emit_doc_level_tables(doc, lines)
     _emit_acknowledgments(doc, lines)
+    _emit_funding(doc, lines)
+    _emit_author_notes(doc, lines)
+    _emit_competing_interests(doc, lines)
+    _emit_data_availability(doc, lines)
     _emit_back_matter(doc, lines, footnote_counter=footnote_counter)
     _emit_references(doc, lines)
     _emit_author_roles(doc, lines)
@@ -296,6 +300,54 @@ def _emit_acknowledgments(doc: Document, lines: list[str]) -> None:
     lines.append("## Acknowledgments")
     lines.append("")
     lines.append(doc.acknowledgments)
+    lines.append("")
+
+
+def _emit_funding(doc: Document, lines: list[str]) -> None:
+    if not doc.funding and not doc.funding_statement:
+        return
+    lines.append("## Funding")
+    lines.append("")
+    for entry in doc.funding:
+        ids = ", ".join(entry.award_ids) if entry.award_ids else ""
+        if entry.funder and ids:
+            lines.append(f"{entry.funder}: {ids}")
+        elif entry.funder:
+            lines.append(entry.funder)
+        elif ids:
+            lines.append(ids)
+    if doc.funding:
+        lines.append("")
+    if doc.funding_statement:
+        lines.append(doc.funding_statement)
+        lines.append("")
+
+
+def _emit_author_notes(doc: Document, lines: list[str]) -> None:
+    if not doc.author_notes:
+        return
+    lines.append("## Author Notes")
+    lines.append("")
+    for note in doc.author_notes:
+        lines.append(note)
+        lines.append("")
+
+
+def _emit_competing_interests(doc: Document, lines: list[str]) -> None:
+    if not doc.competing_interests:
+        return
+    lines.append("## Competing Interests")
+    lines.append("")
+    lines.append(doc.competing_interests)
+    lines.append("")
+
+
+def _emit_data_availability(doc: Document, lines: list[str]) -> None:
+    if not doc.data_availability:
+        return
+    lines.append("## Data Availability")
+    lines.append("")
+    lines.append(doc.data_availability)
     lines.append("")
 
 

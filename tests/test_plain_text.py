@@ -483,3 +483,17 @@ class TestPlainTextNewFeatures:
         )
         result = extract_plain_text(doc, include_sub_articles=True)
         assert "Reviewer comment." in result
+
+    def test_new_fields_included(self):
+        doc = Document(
+            title="Paper",
+            funding_statement="Supported by NIH grant R01.",
+            author_notes=["Corresponding author: a@b.edu"],
+            competing_interests="No competing interests declared.",
+            data_availability="Data deposited at GEO.",
+        )
+        result = extract_plain_text(doc)
+        assert "Supported by NIH grant R01." in result
+        assert "Corresponding author: a@b.edu" in result
+        assert "No competing interests declared." in result
+        assert "Data deposited at GEO." in result

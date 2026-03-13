@@ -78,6 +78,12 @@ class SecondaryAbstract:
 
 
 @dataclass
+class FundingEntry:
+    funder: str = ""
+    award_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Section:
     heading: str = ""
     number: str = ""                  # "1", "1.1", etc. from <head n="...">
@@ -140,6 +146,11 @@ class Document:
     sub_articles: list[Document] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
     article_type: str = ""  # e.g., "decision-letter", "reply", "editor-report"
+    funding: list[FundingEntry] = field(default_factory=list)
+    funding_statement: str = ""
+    data_availability: str = ""
+    author_notes: list[str] = field(default_factory=list)
+    competing_interests: str = ""
 
     # -- Loading methods ---------------------------------------------------
 

@@ -7,6 +7,7 @@ from agr_abc_document_parsers.models import (
     Author,
     Document,
     Figure,
+    FundingEntry,
     ListBlock,
     Paragraph,
     Reference,
@@ -40,6 +41,7 @@ _HR_RE = re.compile(r"^---\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(\d+)\.\s+(.+)$")
 _REF_LINE_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _GFM_SEP_RE = re.compile(r"^\|[-:| ]+\|$")
+_FUNDING_ENTRY_RE = re.compile(r"^(.+?):\s+(.+)$")
 _REF_YEAR_RE = re.compile(r"\((\d{4}[a-z]?)\)")
 _REF_ITALIC_RE = re.compile(r"\*([^*]+)\*")
 _REF_VOL_RE = re.compile(r"^(\d+)(?:\(([^)]+)\))?$")
@@ -173,6 +175,14 @@ def read_markdown(text: str) -> Document:
         elif heading == "Acknowledgments":
             doc.acknowledgments = _parse_acknowledgments_lines(content_lines)
             found_ack = True
+        elif heading == "Funding":
+            _parse_funding_section(content_lines, doc)
+        elif heading == "Author Notes":
+            doc.author_notes = _parse_plain_paragraphs(content_lines)
+        elif heading == "Competing Interests":
+            doc.competing_interests = _parse_single_text_block(content_lines)
+        elif heading == "Data Availability":
+            doc.data_availability = _parse_single_text_block(content_lines)
         elif heading == "References":
             refs = _parse_references_lines(content_lines)
             if refs:
@@ -541,6 +551,41 @@ def _parse_acknowledgments_lines(content_lines: list[str]) -> str:
     for line in content_lines:
         if line.strip():
             parts.append(line)
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Funding, Author Notes, Competing Interests, Data Availability
+# ---------------------------------------------------------------------------
+
+
+def _parse_funding_section(content_lines: list[str], doc: Document) -> None:
+    """Parse ``## Funding`` content into funding entries and statement."""
+    entries: list[FundingEntry] = []
+    statement_lines: list[str] = []
+    for line in content_lines:
+        if not line.strip():
+            continue
+        m = _FUNDING_ENTRY_RE.match(line)
+        if m:
+            funder = m.group(1).strip()
+            ids = [x.strip() for x in m.group(2).split(",") if x.strip()]
+            entries.append(FundingEntry(funder=funder, award_ids=ids))
+        else:
+            statement_lines.append(line)
+    doc.funding = entries
+    if statement_lines:
+        doc.funding_statement = "\n".join(statement_lines)
+
+
+def _parse_plain_paragraphs(content_lines: list[str]) -> list[str]:
+    """Parse content lines into a list of non-blank lines."""
+    return [line for line in content_lines if line.strip()]
+
+
+def _parse_single_text_block(content_lines: list[str]) -> str:
+    """Parse content lines into a single joined text string."""
+    parts = [line for line in content_lines if line.strip()]
     return "\n".join(parts)
 
 

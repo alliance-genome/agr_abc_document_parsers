@@ -1337,3 +1337,274 @@ class TestJatsAuthorRoles:
         ]
         assert doc.authors[1].roles == ["Investigation"]
         assert doc.authors[2].roles == []
+
+
+# -- Funding parsing --------------------------------------------------------
+
+
+class TestFundingParsing:
+    def test_parse_funding_group(self):
+        """Parse funding-group with award-group entries."""
+        xml = b"""<article>
+          <front><article-meta>
+            <funding-group>
+              <award-group><funding-source>NIH</funding-source>
+                <award-id>R01GM12345</award-id></award-group>
+              <award-group><funding-source>Wellcome Trust</funding-source>
+                <award-id>098765</award-id><award-id>054321</award-id></award-group>
+              <funding-statement>Funded by NIH and Wellcome.</funding-statement>
+            </funding-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.funding) == 2
+        assert doc.funding[0].funder == "NIH"
+        assert doc.funding[0].award_ids == ["R01GM12345"]
+        assert doc.funding[1].funder == "Wellcome Trust"
+        assert doc.funding[1].award_ids == ["098765", "054321"]
+        assert doc.funding_statement == "Funded by NIH and Wellcome."
+
+    def test_parse_standalone_funding_statement(self):
+        """Parse funding-statement without award-group."""
+        xml = b"""<article>
+          <front><article-meta>
+            <funding-group>
+              <funding-statement>This work was self-funded.</funding-statement>
+            </funding-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.funding) == 0
+        assert doc.funding_statement == "This work was self-funded."
+
+    def test_no_funding(self):
+        """No funding-group produces empty fields."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert doc.funding == []
+        assert doc.funding_statement == ""
+
+
+# -- Author notes parsing --------------------------------------------------
+
+
+class TestAuthorNotesParsing:
+    def test_parse_author_notes(self):
+        """Parse author-notes with corresp and fn elements."""
+        xml = b"""<article>
+          <front><article-meta>
+            <author-notes>
+              <corresp id="cor1">Corresponding author: foo@bar.edu</corresp>
+              <fn fn-type="equal"><p>These authors contributed equally.</p></fn>
+              <fn fn-type="present-address"><p>Current address: MIT.</p></fn>
+            </author-notes>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.author_notes) == 3
+        assert "foo@bar.edu" in doc.author_notes[0]
+        assert "contributed equally" in doc.author_notes[1]
+        assert "MIT" in doc.author_notes[2]
+
+    def test_coi_excluded_from_author_notes(self):
+        """COI footnotes in author-notes should NOT appear in author_notes."""
+        xml = b"""<article>
+          <front><article-meta>
+            <author-notes>
+              <corresp id="cor1">Contact: test@test.com</corresp>
+              <fn fn-type="conflict"><p>No conflicts.</p></fn>
+            </author-notes>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.author_notes) == 1
+        assert "test@test.com" in doc.author_notes[0]
+        assert "No conflicts" in doc.competing_interests
+
+
+# -- Competing interests parsing --------------------------------------------
+
+
+class TestCompetingInterestsParsing:
+    def test_parse_coi_from_author_notes(self):
+        """Parse competing interests from fn-type=conflict in author-notes."""
+        xml = b"""<article>
+          <front><article-meta>
+            <author-notes>
+              <fn fn-type="conflict">
+                <p>The authors declare no competing interests.</p>
+              </fn>
+            </author-notes>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "no competing interests" in doc.competing_interests
+
+    def test_parse_coi_from_back_fn_group(self):
+        """Parse competing interests from fn-group in back."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <fn-group>
+              <fn fn-type="COI-statement"><p>No conflicts.</p></fn>
+            </fn-group>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "No conflicts" in doc.competing_interests
+
+    def test_coi_excluded_from_back_matter(self):
+        """COI footnotes should NOT appear in back_matter."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <fn-group>
+              <fn fn-type="conflict"><p>No conflicts.</p></fn>
+              <fn fn-type="other"><p>Some other note.</p></fn>
+            </fn-group>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "No conflicts" in doc.competing_interests
+        all_notes = []
+        for sec in doc.back_matter:
+            all_notes.extend(sec.notes)
+        assert any("Some other note" in n for n in all_notes)
+        assert not any("No conflicts" in n for n in all_notes)
+
+
+# -- Data availability parsing ---------------------------------------------
+
+
+class TestDataAvailabilityParsing:
+    def test_parse_from_back_notes(self):
+        """Parse data availability from notes in back."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <notes notes-type="data-availability">
+              <p>All data available at https://example.com.</p>
+            </notes>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "All data available" in doc.data_availability
+
+    def test_parse_from_custom_meta(self):
+        """Parse data availability from custom-meta-group."""
+        xml = b"""<article>
+          <front><article-meta>
+            <custom-meta-group>
+              <custom-meta>
+                <meta-name>Data Availability</meta-name>
+                <meta-value>Data deposited at NCBI GEO.</meta-value>
+              </custom-meta>
+            </custom-meta-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "deposited at NCBI GEO" in doc.data_availability
+
+    def test_data_avail_excluded_from_back_matter(self):
+        """Data availability notes should NOT appear in back_matter."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <notes notes-type="data-availability">
+              <p>Data at GEO.</p>
+            </notes>
+            <notes>
+              <title>Publisher Note</title>
+              <p>Some publisher note.</p>
+            </notes>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "Data at GEO" in doc.data_availability
+        all_paras = []
+        for sec in doc.back_matter:
+            for p in sec.paragraphs:
+                all_paras.append(p.text)
+        assert any("publisher note" in t.lower() for t in all_paras)
+        assert not any("Data at GEO" in t for t in all_paras)
+
+
+# -- Supplementary material expanded coverage -------------------------------
+
+
+class TestSupplementaryMaterialExpanded:
+    def test_supp_material_in_back(self):
+        """Supplementary material as direct child of back is captured."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Results</title><p>Text.</p></sec></body>
+          <back>
+            <supplementary-material>
+              <label>S1 Table</label>
+              <caption><p>List of primers used.</p></caption>
+            </supplementary-material>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        all_text_parts = []
+        for sec in doc.back_matter:
+            for p in sec.paragraphs:
+                all_text_parts.append(p.text)
+        assert any("S1 Table" in t for t in all_text_parts)
+        assert any("primers" in t for t in all_text_parts)
+
+    def test_supp_material_in_app(self):
+        """Supplementary material inside app element is captured."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Results</title><p>Text.</p></sec></body>
+          <back>
+            <app-group>
+              <app>
+                <title>Appendix A</title>
+                <supplementary-material>
+                  <label>S1 File</label>
+                  <caption><p>Raw data.</p></caption>
+                </supplementary-material>
+              </app>
+            </app-group>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        all_text_parts = []
+        for sec in doc.back_matter:
+            for p in sec.paragraphs:
+                all_text_parts.append(p.text)
+        assert any("S1 File" in t for t in all_text_parts)
+
+
+# -- Inline formula ---------------------------------------------------------
+
+
+class TestInlineFormula:
+    def test_inline_formula_preserved(self):
+        """Inline formula text is preserved in paragraph."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Methods</title>
+            <p>The value of <inline-formula>x = 2y + 1</inline-formula> was used.</p>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert doc.sections
+        para_text = doc.sections[0].paragraphs[0].text
+        assert "x = 2y + 1" in para_text
+        assert "was used" in para_text

@@ -11,6 +11,7 @@ from agr_abc_document_parsers.models import (
     Document,
     Figure,
     Formula,
+    FundingEntry,
     InlineRef,
     ListBlock,
     Paragraph,
@@ -74,9 +75,17 @@ def parse_jats(
     doc.references = _parse_bibliography(root)
     doc.acknowledgments = _parse_acknowledgments(root)
 
+    # Dedicated back-matter fields (extracted BEFORE generic back_matter
+    # to allow deduplication — see _parse_back_sections skip logic)
+    doc.funding, doc.funding_statement = _parse_funding(root)
+    doc.author_notes = _parse_author_notes_field(root)
+    doc.competing_interests = _parse_competing_interests(root)
+    doc.data_availability = _parse_data_availability(root)
+
     # Back matter: appendices + additional sections (fn-group, notes, etc.)
+    # Elements already captured in dedicated fields above are skipped.
     back_matter = _parse_appendices(root)
-    back_matter.extend(_parse_back_sections(root))
+    back_matter.extend(_parse_back_sections(root, doc))
     doc.back_matter = back_matter
 
     # Parse floats-group (figures/tables outside body, common in PMC nXML)
@@ -348,6 +357,123 @@ def _parse_categories(root: etree._Element) -> list[str]:
         if subj_text:
             categories.append(subj_text)
     return categories
+
+
+_COI_FN_TYPES = frozenset({"conflict", "COI-statement"})
+
+
+def _parse_funding(
+    root: etree._Element,
+) -> tuple[list[FundingEntry], str]:
+    """Parse ``<funding-group>`` from article-meta.
+
+    Returns (funding_entries, funding_statement).
+    """
+    entries: list[FundingEntry] = []
+    statement = ""
+    fg = root.find(".//article-meta/funding-group")
+    if fg is None:
+        return entries, statement
+    for ag in fg.findall("award-group"):
+        funder_elem = ag.find("funding-source")
+        funder = all_text(funder_elem) if funder_elem is not None else ""
+        award_ids: list[str] = []
+        for aid in ag.findall("award-id"):
+            aid_text = text(aid)
+            if aid_text:
+                award_ids.append(aid_text)
+        if funder or award_ids:
+            entries.append(FundingEntry(funder=funder, award_ids=award_ids))
+    fs_elem = fg.find("funding-statement")
+    if fs_elem is not None:
+        statement = all_text(fs_elem)
+    if not statement:
+        fs_elem = root.find(".//article-meta/funding-statement")
+        if fs_elem is not None:
+            statement = all_text(fs_elem)
+    return entries, statement
+
+
+def _parse_author_notes_field(root: etree._Element) -> list[str]:
+    """Parse ``<author-notes>`` from article-meta into flat strings.
+
+    Skips COI footnotes (handled by ``_parse_competing_interests``).
+    """
+    notes: list[str] = []
+    an = root.find(".//article-meta/author-notes")
+    if an is None:
+        return notes
+    for child in an:
+        tag = etree.QName(child.tag).localname if isinstance(
+            child.tag, str
+        ) else ""
+        if tag == "corresp":
+            t = all_text(child)
+            if t:
+                notes.append(t)
+        elif tag == "fn":
+            fn_type = child.get("fn-type", "")
+            if fn_type in _COI_FN_TYPES:
+                continue
+            t = all_text(child)
+            if t:
+                notes.append(t)
+    return notes
+
+
+def _parse_competing_interests(root: etree._Element) -> str:
+    """Extract competing-interest statements from author-notes and back."""
+    parts: list[str] = []
+    # From author-notes
+    an = root.find(".//article-meta/author-notes")
+    if an is not None:
+        for fn in an.findall("fn"):
+            if fn.get("fn-type", "") in _COI_FN_TYPES:
+                fn_text = all_text(fn)
+                if fn_text:
+                    parts.append(fn_text)
+    # From back/fn-group
+    back = root.find("back")
+    if back is None:
+        back = root.find(".//back")
+    if back is not None:
+        for fg in back.findall("fn-group"):
+            for fn in fg.findall("fn"):
+                if fn.get("fn-type", "") in _COI_FN_TYPES:
+                    fn_text = all_text(fn)
+                    if fn_text:
+                        parts.append(fn_text)
+    return "\n\n".join(parts)
+
+
+def _parse_data_availability(root: etree._Element) -> str:
+    """Extract data-availability statement from back/notes or custom-meta."""
+    parts: list[str] = []
+    # From back/notes[@notes-type='data-availability']
+    back = root.find("back")
+    if back is None:
+        back = root.find(".//back")
+    if back is not None:
+        for notes_elem in back.findall("notes"):
+            if notes_elem.get("notes-type") == "data-availability":
+                for p in notes_elem.findall(".//p"):
+                    p_text = all_text(p)
+                    if p_text:
+                        parts.append(p_text)
+    # From custom-meta-group
+    if not parts:
+        for cm in root.findall(
+            ".//article-meta/custom-meta-group/custom-meta"
+        ):
+            meta_name = cm.find("meta-name")
+            meta_value = cm.find("meta-value")
+            if meta_name is not None and meta_value is not None:
+                name_text = all_text(meta_name)
+                if name_text and "data availability" in name_text.lower():
+                    val_text = all_text(meta_value)
+                    if val_text:
+                        parts.append(val_text)
+    return "\n\n".join(parts)
 
 
 def _parse_affiliations(root: etree._Element) -> dict[str, str]:
@@ -957,17 +1083,52 @@ def _parse_appendices(root: etree._Element) -> list[Section]:
             section.tables.append(_parse_table_wrap(tw))
         for fig in app.findall("fig"):
             section.figures.append(_parse_fig(fig))
+        for supp in app.findall("supplementary-material"):
+            _parse_supplementary(supp, section)
+        for fn_grp in app.findall("fn-group"):
+            for fn in fn_grp.findall("fn"):
+                fn_text = all_text(fn)
+                if fn_text:
+                    section.notes.append(fn_text)
         sections.append(section)
+
+    # Also handle standalone <app> directly under <back> (without app-group)
+    if back is not None:
+        for app in back.findall("app"):
+            section = Section(level=1)
+            title_elem = app.find("title")
+            if title_elem is not None:
+                section.heading = all_text(title_elem)
+            for sec in app.findall("sec"):
+                section.subsections.append(_parse_sec(sec, level=2))
+            for p in app.findall("p"):
+                section.paragraphs.append(_parse_paragraph(p))
+            for tw in app.findall("table-wrap"):
+                section.tables.append(_parse_table_wrap(tw))
+            for fig in app.findall("fig"):
+                section.figures.append(_parse_fig(fig))
+            for supp in app.findall("supplementary-material"):
+                _parse_supplementary(supp, section)
+            if (section.heading or section.paragraphs or section.tables
+                    or section.figures or section.subsections):
+                sections.append(section)
 
     return sections
 
 
-def _parse_back_sections(root: etree._Element) -> list[Section]:
+def _parse_back_sections(
+    root: etree._Element,
+    doc: Document | None = None,
+) -> list[Section]:
     """Extract additional back-matter sections (fn-group, notes, sec).
 
     These appear as direct children of <back> alongside <ack>,
     <ref-list>, and <app-group>.  They include footnotes, author
     contributions, data-availability statements, COI disclosures, etc.
+
+    Elements that have already been captured into dedicated Document
+    fields (competing interests, data availability) are skipped to
+    avoid content duplication.
     """
     sections: list[Section] = []
     back = root.find("back")
@@ -989,12 +1150,19 @@ def _parse_back_sections(root: etree._Element) -> list[Section]:
             if title_elem is not None:
                 section.heading = all_text(title_elem)
             for fn in child.findall("fn"):
+                # Skip COI footnotes already captured in doc.competing_interests
+                fn_type = fn.get("fn-type", "")
+                if fn_type in _COI_FN_TYPES:
+                    continue
                 fn_text = all_text(fn)
                 if fn_text:
                     section.notes.append(fn_text)
             if section.notes or section.heading:
                 sections.append(section)
         elif tag == "notes":
+            # Skip data-availability notes already captured
+            if child.get("notes-type") == "data-availability":
+                continue
             section = Section(level=1)
             title_elem = child.find("title")
             if title_elem is not None:
@@ -1004,6 +1172,11 @@ def _parse_back_sections(root: etree._Element) -> list[Section]:
                 if p_text:
                     section.paragraphs.append(Paragraph(text=p_text))
             if section.paragraphs or section.heading:
+                sections.append(section)
+        elif tag == "supplementary-material":
+            section = Section(level=1)
+            _parse_supplementary(child, section)
+            if section.paragraphs:
                 sections.append(section)
         elif tag == "glossary":
             section = Section(level=1)
