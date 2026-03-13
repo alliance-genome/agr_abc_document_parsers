@@ -55,6 +55,14 @@ All original 5 failures and 3 additional edge cases fixed:
       for unknown inline containers (was `all_text`, lost nested formatting)
     - 15 new tests for all improvements
 
+16. **JATS parser improvements (round 4 — closing remaining gaps):**
+    - `<self-uri>` → `Document.self_uri` field
+    - `<trans-abstract>` → secondary abstracts with language-tagged type
+    - `<kwd-group>` improvements: skip `abbreviations` type, handle `<compound-kwd>`
+    - Table `rowspan` expansion: cells properly inserted into subsequent rows
+    - Refactored `_parse_table_row` to return rowspan info + new `_expand_rowspans`
+    - 13 new tests for all improvements
+
 ## Next Steps
 
 ### Run on a larger random sample (200+ articles)
@@ -62,12 +70,11 @@ All original 5 failures and 3 additional edge cases fixed:
 - A larger sample will surface rarer edge cases
 - Consider adding interesting failures to the fixed article set
 
-### Remaining JATS parser gaps (low priority)
+### Remaining minor gaps (no content loss)
 
-- `<self-uri>` — not extracted
-- `<trans-title-group>`, `<trans-abstract>` — translated content not extracted
-- `<kwd-group>` attributes (`kwd-group-type`, `xml:lang`) — not differentiated
-- Table attributes: `align`, `valign`, `scope`, `rowspan` correction
-- `<named-content>` `content-type` attribute not stored (useful for NLP)
+- `<named-content>` `content-type` attribute not stored (useful for downstream NLP)
+- Table cell `align`/`valign`/`scope` attributes not preserved
+- `<trans-title-group>` translated titles not extracted
+- `<counts>` (page-count, fig-count, etc.) not extracted
 
 **Full details:** See `docs/nxml-parser-gap-analysis.md`

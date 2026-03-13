@@ -233,14 +233,43 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
             elif date_type in ("accepted", "acc") and date_str:
                 doc.accepted_date = date_str
 
+    # Self-URI (article PDF or landing page link)
+    self_uri_el = meta.find("self-uri")
+    if self_uri_el is not None:
+        href = self_uri_el.get(
+            "{http://www.w3.org/1999/xlink}href", ""
+        )
+        if not href:
+            href = self_uri_el.get("href", "")
+        if not href:
+            href = text(self_uri_el)
+        doc.self_uri = href
+
 
 def _parse_keywords(root: etree._Element) -> list[str]:
-    """Extract keywords from kwd-group/kwd."""
+    """Extract keywords from kwd-group/kwd.
+
+    Handles ``<compound-kwd>`` (joins parts with space) and skips
+    ``kwd-group-type="abbreviations"`` groups that aren't true keywords.
+    """
     keywords: list[str] = []
-    for kwd in root.findall(".//article-meta/kwd-group/kwd"):
-        kwd_text = all_text(kwd)
-        if kwd_text:
-            keywords.append(kwd_text)
+    for kwd_group in root.findall(".//article-meta/kwd-group"):
+        group_type = kwd_group.get("kwd-group-type", "")
+        # Skip abbreviation lists — not really keywords
+        if group_type == "abbreviations":
+            continue
+        for kwd in kwd_group.findall("kwd"):
+            kwd_text = all_text(kwd)
+            if kwd_text:
+                keywords.append(kwd_text)
+        # Compound keywords: <compound-kwd><compound-kwd-part>...</compound-kwd-part>
+        for ckwd in kwd_group.findall("compound-kwd"):
+            parts = [
+                all_text(p) for p in ckwd.findall("compound-kwd-part")
+                if all_text(p)
+            ]
+            if parts:
+                keywords.append(" ".join(parts))
     return keywords
 
 
@@ -325,6 +354,23 @@ def _parse_secondary_abstracts(
             label=label,
             paragraphs=paragraphs,
         ))
+
+    # Translated abstracts (<trans-abstract>)
+    for tab in root.findall(".//article-meta/trans-abstract"):
+        lang = tab.get("{http://www.w3.org/XML/1998/namespace}lang", "")
+        title_elem = tab.find("title")
+        if title_elem is not None:
+            label = all_text(title_elem)
+        else:
+            label = f"Translated Abstract ({lang})" if lang else "Translated Abstract"
+        paragraphs = _parse_abstract_content(tab)
+        if paragraphs:
+            results.append(SecondaryAbstract(
+                abstract_type=f"trans-abstract-{lang}" if lang else "trans-abstract",
+                label=label,
+                paragraphs=paragraphs,
+            ))
+
     return results
 
 
@@ -1125,36 +1171,39 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         # Table may be inside <alternatives> wrapper
         table_elem = tw_elem.find("alternatives/table")
     if table_elem is not None:
+        raw_rows: list[list[TableCell]] = []
+        raw_spans: list[list[int]] = []
+
+        def _collect_trs(
+            parent: etree._Element, is_header: bool,
+        ) -> None:
+            for tr in parent.findall("tr"):
+                cells, spans = _parse_table_row(tr, is_header=is_header)
+                if cells:
+                    raw_rows.append(cells)
+                    raw_spans.append(spans)
+
         # Parse thead
         thead = table_elem.find("thead")
         if thead is not None:
-            for tr in thead.findall("tr"):
-                row = _parse_table_row(tr, is_header=True)
-                if row:
-                    table.rows.append(row)
+            _collect_trs(thead, is_header=True)
 
         # Parse tbody
         tbody = table_elem.find("tbody")
         if tbody is not None:
-            for tr in tbody.findall("tr"):
-                row = _parse_table_row(tr, is_header=False)
-                if row:
-                    table.rows.append(row)
+            _collect_trs(tbody, is_header=False)
 
         # Parse tfoot (footer rows — append as data rows)
         tfoot = table_elem.find("tfoot")
         if tfoot is not None:
-            for tr in tfoot.findall("tr"):
-                row = _parse_table_row(tr, is_header=False)
-                if row:
-                    table.rows.append(row)
+            _collect_trs(tfoot, is_header=False)
 
         # Direct tr elements (no thead/tbody)
         if thead is None and tbody is None and tfoot is None:
-            for tr in table_elem.findall("tr"):
-                row = _parse_table_row(tr, is_header=False)
-                if row:
-                    table.rows.append(row)
+            _collect_trs(table_elem, is_header=False)
+
+        # Expand rowspan cells into subsequent rows
+        table.rows = _expand_rowspans(raw_rows, raw_spans)
 
     # Table footnotes from <table-wrap-foot>
     # Some articles use <fn> elements, others use bare <p> elements.
@@ -1175,25 +1224,27 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
     return table
 
 
-def _parse_table_row(tr_elem: etree._Element, is_header: bool) -> list[TableCell]:
-    """Parse a <tr> element into a list of TableCells.
+def _parse_table_row(
+    tr_elem: etree._Element, is_header: bool,
+) -> tuple[list[TableCell], list[int]]:
+    """Parse a <tr> element into a list of TableCells and rowspan counts.
 
-    Handles colspan by emitting empty padding cells so GFM tables
-    stay aligned.
+    Returns:
+        (cells, rowspans) where rowspans[i] is the rowspan value for
+        cells[i].  Colspan is expanded inline with empty padding cells
+        (rowspan 1).
     """
-    cells = []
+    cells: list[TableCell] = []
+    rowspans: list[int] = []
     for child in tr_elem:
         tag = etree.QName(child.tag).localname if isinstance(
             child.tag, str
         ) else ""
         if tag in ("th", "td"):
-            rowspan_val = child.get("rowspan", "1") or "1"
-            if rowspan_val != "1":
-                logger.warning(
-                    "rowspan=%s on <%s> not supported; table may "
-                    "be misaligned in Markdown output",
-                    rowspan_val, tag,
-                )
+            try:
+                rowspan = max(int(child.get("rowspan", "1") or "1"), 1)
+            except (ValueError, OverflowError):
+                rowspan = 1
             try:
                 colspan = min(int(child.get("colspan", "1") or "1"), 50)
             except (ValueError, OverflowError):
@@ -1203,12 +1254,63 @@ def _parse_table_row(tr_elem: etree._Element, is_header: bool) -> list[TableCell
                 is_header=(tag == "th" or is_header),
             )
             cells.append(cell)
+            rowspans.append(rowspan)
             for _ in range(colspan - 1):
                 cells.append(TableCell(
                     text="",
                     is_header=(tag == "th" or is_header),
                 ))
-    return cells
+                rowspans.append(rowspan)
+    return cells, rowspans
+
+
+def _expand_rowspans(
+    rows: list[list[TableCell]],
+    row_spans: list[list[int]],
+) -> list[list[TableCell]]:
+    """Expand rowspan cells into subsequent rows.
+
+    For each cell with rowspan > 1, inserts an empty cell at the same
+    column position in the subsequent rows.
+    """
+    if not rows:
+        return rows
+
+    # Build a grid, inserting carry-over cells from rowspans.
+    # pending[col] = (remaining_rows, cell) for active rowspans.
+    pending: dict[int, tuple[int, TableCell]] = {}
+    result: list[list[TableCell]] = []
+
+    for row_idx, (row, spans) in enumerate(zip(rows, row_spans)):
+        expanded: list[TableCell] = []
+        src_col = 0  # index into the original row
+        out_col = 0  # index into the expanded row
+
+        while src_col < len(row) or out_col in pending:
+            if out_col in pending:
+                remaining, orig_cell = pending[out_col]
+                expanded.append(TableCell(
+                    text="",
+                    is_header=orig_cell.is_header,
+                ))
+                if remaining > 1:
+                    pending[out_col] = (remaining - 1, orig_cell)
+                else:
+                    del pending[out_col]
+                out_col += 1
+            elif src_col < len(row):
+                expanded.append(row[src_col])
+                span = spans[src_col] if src_col < len(spans) else 1
+                if span > 1:
+                    pending[out_col] = (span - 1, row[src_col])
+                src_col += 1
+                out_col += 1
+            else:
+                break
+
+        result.append(expanded)
+
+    return result
 
 
 def _parse_formula(formula_elem: etree._Element) -> Formula:

@@ -159,6 +159,7 @@ class Document:
     accepted_date: str = ""   # ISO-ish: "2014-02-06" or "2014-02"
     copyright: str = ""       # copyright statement text
     license_url: str = ""     # license URL (e.g., Creative Commons)
+    self_uri: str = ""        # article self-URI (e.g., PDF link)
 
     # -- Loading methods ---------------------------------------------------
 

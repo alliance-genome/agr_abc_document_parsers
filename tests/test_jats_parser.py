@@ -939,8 +939,8 @@ class TestJatsParser:
         para = doc.sections[0].paragraphs[0].text
         assert "*Drosophila <sup>x</sup>*" in para
 
-    def test_parse_rowspan_warning(self, caplog):
-        """rowspan on table cells logs a warning."""
+    def test_parse_rowspan_expanded(self):
+        """rowspan on table cells expanded into subsequent rows."""
         jats = b"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <article><front><article-meta>
@@ -956,12 +956,16 @@ class TestJatsParser:
   </table></table-wrap>
 </sec></body></article>
 """
-        import logging
-        with caplog.at_level(logging.WARNING):
-            doc = parse_jats(jats)
-        assert any("rowspan" in r.message for r in caplog.records)
-        # Table still parsed (just potentially misaligned)
-        assert len(doc.sections[0].tables[0].rows) >= 2
+        doc = parse_jats(jats)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 3  # 1 header + 2 data
+        # Row 1 (first data row): "Spanning" | "1"
+        assert table.rows[1][0].text == "Spanning"
+        assert table.rows[1][1].text == "1"
+        # Row 2 (second data row): "" (rowspan carry) | "2"
+        assert len(table.rows[2]) == 2
+        assert table.rows[2][0].text == ""  # expanded from rowspan
+        assert table.rows[2][1].text == "2"
 
     def test_parse_ref_author_editor_separation(self):
         """Editors not captured as authors in refs with both groups."""
@@ -2884,3 +2888,256 @@ class TestDateInCitation:
         assert "March 2024" in ref.comment
         # No "Accessed" prefix when content-type is not "access-date"
         assert not ref.comment.startswith("Accessed")
+
+
+# -- <self-uri> extraction -------------------------------------------------
+
+
+class TestSelfUri:
+    def test_self_uri_from_href(self):
+        """<self-uri xlink:href='...'> captured."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <self-uri xmlns:xlink="http://www.w3.org/1999/xlink"
+                    xlink:href="https://example.com/article/12345"/>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.self_uri == "https://example.com/article/12345"
+
+    def test_self_uri_text_fallback(self):
+        """<self-uri> text used when no href attribute."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <self-uri>https://example.com/pdf/12345.pdf</self-uri>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.self_uri == "https://example.com/pdf/12345.pdf"
+
+    def test_no_self_uri(self):
+        """No <self-uri> leaves field empty."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.self_uri == ""
+
+
+# -- <trans-abstract> as secondary abstract --------------------------------
+
+
+class TestTransAbstract:
+    def test_trans_abstract_captured(self):
+        """<trans-abstract> becomes a secondary abstract."""
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<article><front><article-meta>"
+            "  <title-group><article-title>T</article-title></title-group>"
+            "  <abstract><p>Main abstract in English.</p></abstract>"
+            '  <trans-abstract xml:lang="es">'
+            "    <title>Resumen</title>"
+            "    <p>Resumen principal en espa\u00f1ol.</p>"
+            "  </trans-abstract>"
+            "</article-meta></front>"
+            "<body><sec><title>I</title><p>X.</p></sec></body></article>"
+        ).encode("utf-8")
+        doc = parse_jats(xml)
+        assert len(doc.abstract) == 1
+        assert "English" in doc.abstract[0].text
+        assert len(doc.secondary_abstracts) == 1
+        sa = doc.secondary_abstracts[0]
+        assert sa.label == "Resumen"
+        assert sa.abstract_type == "trans-abstract-es"
+        assert "espa\u00f1ol" in sa.paragraphs[0].text
+
+    def test_trans_abstract_no_title(self):
+        """<trans-abstract> without <title> gets auto-generated label."""
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<article><front><article-meta>"
+            "  <title-group><article-title>T</article-title></title-group>"
+            "  <abstract><p>Main abstract.</p></abstract>"
+            '  <trans-abstract xml:lang="fr">'
+            "    <p>R\u00e9sum\u00e9 en fran\u00e7ais.</p>"
+            "  </trans-abstract>"
+            "</article-meta></front>"
+            "<body><sec><title>I</title><p>X.</p></sec></body></article>"
+        ).encode("utf-8")
+        doc = parse_jats(xml)
+        assert len(doc.secondary_abstracts) == 1
+        sa = doc.secondary_abstracts[0]
+        assert "fr" in sa.label
+        assert "fran\u00e7ais" in sa.paragraphs[0].text
+
+    def test_multiple_trans_abstracts(self):
+        """Multiple <trans-abstract> elements captured."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <abstract><p>English abstract.</p></abstract>
+          <trans-abstract xml:lang="es"><p>Spanish summary.</p></trans-abstract>
+          <trans-abstract xml:lang="pt"><p>Portuguese summary.</p></trans-abstract>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.secondary_abstracts) == 2
+        types = [sa.abstract_type for sa in doc.secondary_abstracts]
+        assert "trans-abstract-es" in types
+        assert "trans-abstract-pt" in types
+
+
+# -- Improved keyword parsing ----------------------------------------------
+
+
+class TestKeywordImprovements:
+    def test_abbreviation_group_skipped(self):
+        """kwd-group-type='abbreviations' not included in keywords."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <kwd-group kwd-group-type="author">
+            <kwd>genomics</kwd>
+            <kwd>bioinformatics</kwd>
+          </kwd-group>
+          <kwd-group kwd-group-type="abbreviations">
+            <kwd>GO: Gene Ontology</kwd>
+            <kwd>MOD: Model Organism Database</kwd>
+          </kwd-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "genomics" in doc.keywords
+        assert "bioinformatics" in doc.keywords
+        assert len(doc.keywords) == 2
+
+    def test_compound_keywords(self):
+        """<compound-kwd> parts joined with space."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <kwd-group>
+            <kwd>simple keyword</kwd>
+            <compound-kwd>
+              <compound-kwd-part>Drosophila</compound-kwd-part>
+              <compound-kwd-part>melanogaster</compound-kwd-part>
+            </compound-kwd>
+          </kwd-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "simple keyword" in doc.keywords
+        assert "Drosophila melanogaster" in doc.keywords
+
+    def test_multiple_kwd_groups_combined(self):
+        """Keywords from multiple non-abbreviation groups combined."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <kwd-group kwd-group-type="author">
+            <kwd>alpha</kwd>
+          </kwd-group>
+          <kwd-group kwd-group-type="discipline">
+            <kwd>beta</kwd>
+          </kwd-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "alpha" in doc.keywords
+        assert "beta" in doc.keywords
+
+
+# -- Table rowspan expansion -----------------------------------------------
+
+
+class TestRowspanExpansion:
+    def test_simple_rowspan(self):
+        """rowspan=2 inserts empty cell in next row."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap><table>
+            <thead><tr><th>Category</th><th>Item</th><th>Value</th></tr></thead>
+            <tbody>
+              <tr><td rowspan="2">Group A</td><td>Item 1</td><td>10</td></tr>
+              <tr><td>Item 2</td><td>20</td></tr>
+            </tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 3  # 1 header + 2 data
+        # Row 1: "Group A" | "Item 1" | "10"
+        assert table.rows[1][0].text == "Group A"
+        assert table.rows[1][1].text == "Item 1"
+        assert table.rows[1][2].text == "10"
+        # Row 2: "" (carry from rowspan) | "Item 2" | "20"
+        assert len(table.rows[2]) == 3
+        assert table.rows[2][0].text == ""
+        assert table.rows[2][1].text == "Item 2"
+        assert table.rows[2][2].text == "20"
+
+    def test_rowspan_3(self):
+        """rowspan=3 inserts empty cells in two subsequent rows."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap><table>
+            <tbody>
+              <tr><td rowspan="3">Span</td><td>A</td></tr>
+              <tr><td>B</td></tr>
+              <tr><td>C</td></tr>
+            </tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 3
+        assert table.rows[0][0].text == "Span"
+        assert table.rows[0][1].text == "A"
+        assert table.rows[1][0].text == ""
+        assert table.rows[1][1].text == "B"
+        assert table.rows[2][0].text == ""
+        assert table.rows[2][1].text == "C"
+
+    def test_rowspan_with_colspan(self):
+        """Both rowspan and colspan on same cell."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap><table>
+            <tbody>
+              <tr><td rowspan="2" colspan="2">Big</td><td>C</td></tr>
+              <tr><td>D</td></tr>
+            </tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        # Row 0: "Big" | "" (colspan) | "C"
+        assert len(table.rows[0]) == 3
+        assert table.rows[0][0].text == "Big"
+        assert table.rows[0][1].text == ""  # colspan padding
+        assert table.rows[0][2].text == "C"
+        # Row 1: "" | "" (both from rowspan of colspan=2 cell) | "D"
+        assert len(table.rows[1]) == 3
+        assert table.rows[1][0].text == ""
+        assert table.rows[1][1].text == ""
+        assert table.rows[1][2].text == "D"
+
+    def test_no_rowspan_unchanged(self):
+        """Tables without rowspan are unaffected."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap><table>
+            <thead><tr><th>A</th><th>B</th></tr></thead>
+            <tbody><tr><td>1</td><td>2</td></tr></tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 2
+        assert table.rows[0][0].text == "A"
+        assert table.rows[1][0].text == "1"
