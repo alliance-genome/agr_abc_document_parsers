@@ -1608,3 +1608,73 @@ class TestInlineFormula:
         para_text = doc.sections[0].paragraphs[0].text
         assert "x = 2y + 1" in para_text
         assert "was used" in para_text
+
+
+# -- List with multi-paragraph items ----------------------------------------
+
+
+class TestListMultiParagraph:
+    def test_list_items_preserve_all_paragraphs(self):
+        """List items with multiple <p> elements preserve all text."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Response</title>
+            <p><list list-type="bullet">
+              <list-item>
+                <p><bold>Criteria</bold></p>
+                <p>The criteria were clearly defined.</p>
+                <p>Additional details follow.</p>
+              </list-item>
+              <list-item>
+                <p><bold>Methods</bold></p>
+                <p>The methods were validated.</p>
+              </list-item>
+            </list></p>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert doc.sections
+        sec = doc.sections[0]
+        assert len(sec.lists) == 1
+        items = sec.lists[0].items
+        assert len(items) == 2
+        # First item should contain all three paragraphs
+        assert "Criteria" in items[0]
+        assert "clearly defined" in items[0]
+        assert "Additional details" in items[0]
+        # Second item should contain both paragraphs
+        assert "Methods" in items[1]
+        assert "validated" in items[1]
+
+
+# -- Table inside <alternatives> ---------------------------------------------
+
+
+class TestTableAlternatives:
+    def test_table_in_alternatives_wrapper(self):
+        """Table inside <alternatives> is still parsed."""
+        xml = b"""<article>
+          <front><article-meta></article-meta></front>
+          <body><sec><title>Results</title>
+            <table-wrap id="tab1">
+              <label>Table 1.</label>
+              <alternatives>
+                <table>
+                  <thead><tr><th>Drug</th><th>Resistance</th></tr></thead>
+                  <tbody><tr><td>Tetracycline</td><td>High</td></tr></tbody>
+                </table>
+                <graphic xlink:href="table1.png"
+                         xmlns:xlink="http://www.w3.org/1999/xlink"/>
+              </alternatives>
+            </table-wrap>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert doc.sections
+        sec = doc.sections[0]
+        assert len(sec.tables) == 1
+        table = sec.tables[0]
+        assert table.label == "Table 1."
+        assert len(table.rows) == 2
+        assert table.rows[0][0].text == "Drug"
+        assert table.rows[1][0].text == "Tetracycline"

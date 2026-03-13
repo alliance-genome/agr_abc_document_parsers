@@ -469,21 +469,27 @@ def _normalize_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     # Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
-    # Remove isolated citation numbers that appear after punctuation or words
+    # Remove isolated citation numbers that appear directly after words
     # e.g., "synaptic plasticity1" → "synaptic plasticity"
-    # But be careful not to remove meaningful numbers
-    text = re.sub(r"(?<=[a-zA-Z.)])(\d{1,3})(?=[\s.,;:]|$)", "", text)
+    # Only strip after letters (not after digits/periods to preserve "1.0", "4.53")
+    text = re.sub(r"(?<=[a-zA-Z)])(\d{1,3})(?=[\s.,;:]|$)", "", text)
     # Lowercase
     text = text.lower()
     return text
 
 
 def _normalize_paragraph(text: str) -> str:
-    """Normalize a paragraph for matching — more aggressive than _normalize_text."""
-    text = _normalize_text(text)
-    # Remove all non-alphanumeric except spaces (for matching purposes)
+    """Normalize a paragraph for matching — more aggressive than _normalize_text.
+
+    Unlike ``_normalize_text``, this does NOT strip citation numbers so that
+    numeric data in table cells is preserved for accurate matching.
+    """
+    text = _DOI_PREFIX_RE.sub("", text)
+    text = unicodedata.normalize("NFKC", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text.lower()
+    # Remove all non-alphanumeric except spaces
     text = re.sub(r"[^\w\s]", "", text)
-    # Collapse whitespace again after removing punctuation
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -527,6 +533,13 @@ def _find_best_paragraph_match(
         if norm_pmc in norm_ours or norm_ours in norm_pmc:
             return (1.0, i)
 
+        # Space-stripped containment: handles table cell data where
+        # token boundaries differ (e.g., "litersday 10" vs "litersday10")
+        pmc_nospace = norm_pmc.replace(" ", "")
+        ours_nospace = norm_ours.replace(" ", "")
+        if pmc_nospace in ours_nospace or ours_nospace in pmc_nospace:
+            return (1.0, i)
+
         # Token overlap pre-filter
         our_tokens = set(norm_ours.split())
         overlap = len(pmc_tokens & our_tokens) / max(len(pmc_tokens), len(our_tokens))
@@ -563,10 +576,16 @@ _METADATA_PATTERNS = [
     re.compile(r"^EISSN:", re.I),
     re.compile(r"^How to cite this article:", re.I),
     re.compile(r"^This file is available for text mining", re.I),
-    re.compile(r"^Publisher.?s note:", re.I),
+    re.compile(r"^Publisher.?s note:?", re.I),
     re.compile(r"^Click here for additional data file", re.I),
     re.compile(r"^Abbreviations?:", re.I),
     re.compile(r"^Abbreviation: ", re.I),
+    # Publisher neutrality statement (not behind "Publisher's note:" prefix)
+    re.compile(r"^Springer Nature remains neutral", re.I),
+    # Editorial markers
+    re.compile(r"^Papers of special note have been highlighted", re.I),
+    # Supplement descriptions in PMC text
+    re.compile(r"^Multimedia Appendix \d+", re.I),
 ]
 
 # Author listing patterns (individual author lines)
@@ -580,13 +599,36 @@ _AFFIL_PATTERN = re.compile(r"^\d+ (?:Department|School|Institute|Faculty|Colleg
 # Email patterns
 _EMAIL_PATTERN = re.compile(r"^[a-z] [a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
+# Author biography patterns (PMC includes <bio> content we don't parse)
+_AUTHOR_BIO_PATTERN = re.compile(
+    r"^[A-Z][a-z]+ [A-Z][a-z]+ is currently (?:a |an )?(?:professor|associate|assistant|lecturer)",
+    re.I,
+)
+
+# Abbreviation definition lines: "ABBREV full expansion" (no punctuation at end)
+# These come from abbreviation/glossary sections that BioC also excludes.
+_ABBREV_DEF_PATTERN = re.compile(
+    r"^[A-Za-z0-9α-ωΑ-Ω/+-]+\s+[A-Z][a-z]",
+)
+
+# Back-matter heading variations that map to our structured fields
+_BACKMATTER_HEADING_ALIASES = {
+    "conflict of interest", "conflicts of interest",
+    "conflict of interests",
+    "ethics/ethical approval", "ethical approval",
+    "medical writing, editorial, and other assistance",
+    "medical writing, editorial and other assistance",
+    "notes and references",
+    "declarations",
+}
+
 
 def _classify_pmc_paragraph(para: str) -> str:
     """Classify a PMC paragraph into a content category.
 
     Returns one of:
         'metadata' - publication metadata we don't include
-        'author_info' - author names/affiliations/emails
+        'author_info' - author names/affiliations/emails/bios
         'body' - actual body content we should match
         'figure_caption' - figure/table caption text
         'section_heading' - section heading text
@@ -605,6 +647,9 @@ def _classify_pmc_paragraph(para: str) -> str:
         return "author_info"
     if _EMAIL_PATTERN.match(stripped):
         return "author_info"
+    # Author biographies (from <bio> elements in JATS back matter)
+    if _AUTHOR_BIO_PATTERN.match(stripped):
+        return "author_info"
 
     # Figure/table captions
     if re.match(r"^Figure \d+", stripped) or re.match(r"^Table \d+", stripped):
@@ -612,6 +657,13 @@ def _classify_pmc_paragraph(para: str) -> str:
 
     # Short headings (typically section titles)
     if len(stripped) < 80 and not stripped.endswith("."):
+        # Check if it's a back-matter heading variant we handle as structured fields
+        if stripped.lower() in _BACKMATTER_HEADING_ALIASES:
+            return "metadata"
+        # Check for abbreviation definitions (short "ABBREV Expansion" lines)
+        # that BioC also excludes from its ABBR section
+        if _ABBREV_DEF_PATTERN.match(stripped) and len(stripped) < 60:
+            return "metadata"
         return "section_heading"
 
     return "body"

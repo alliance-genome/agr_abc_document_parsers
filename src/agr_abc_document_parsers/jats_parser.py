@@ -848,6 +848,9 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         table.caption = " ".join(p for p in parts if p)
 
     table_elem = tw_elem.find("table")
+    if table_elem is None:
+        # Table may be inside <alternatives> wrapper
+        table_elem = tw_elem.find("alternatives/table")
     if table_elem is not None:
         # Parse thead
         thead = table_elem.find("thead")
@@ -936,16 +939,21 @@ def _parse_formula(formula_elem: etree._Element) -> Formula:
 
 
 def _parse_list(list_elem: etree._Element) -> ListBlock:
-    """Parse a <list> element."""
+    """Parse a <list> element.
+
+    Each list-item may contain multiple <p> elements.  All paragraphs within
+    a single list-item are joined with newlines into one item string so that
+    no body text is lost.
+    """
     list_type = list_elem.get("list-type", "")
     ordered = list_type in ("order", "ordered", "number")
 
     items: list[str] = []
     for item_elem in list_elem.findall("list-item"):
-        # list-item typically contains <p>
-        p = item_elem.find("p")
-        if p is not None:
-            item_text = all_text(p)
+        paras = item_elem.findall("p")
+        if paras:
+            parts = [all_text(p) for p in paras]
+            item_text = "\n".join(t for t in parts if t)
         else:
             item_text = all_text(item_elem)
         if item_text:

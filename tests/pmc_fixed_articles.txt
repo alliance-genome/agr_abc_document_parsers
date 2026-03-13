@@ -21,3 +21,7 @@
 5419721
 # Deep nested sections - Frontiers
 5987773
+# Nested list with multi-paragraph items inside <p> - Springer letter-to-editor
+12975773
+# Table inside <alternatives> wrapper - Elsevier
+12976086
