@@ -1,11 +1,10 @@
 # Fixed PMCIDs for regression testing.
 # Each line is a PMCID (without "PMC" prefix) plus optional comment.
 # These articles exercise specific edge cases in the JATS parser.
+# All articles must be available on the PMC S3 bucket (pmc-oa-opendata).
 
 # Sub-articles (decision letter + author response) - eLife
 4876383
-# Funding group with multiple awards - PLOS Genetics
-3585049
 # Author notes with equal contribution - PLOS Biology
 3747991
 # Competing interests in back fn-group - Nature Communications
@@ -20,9 +19,5 @@
 4256267
 # Inline formula in methods - Physical Review
 5419721
-# Complex table with colspan/rowspan - Nucleic Acids Research
-6061859
-# Appendices with supplementary files - G3
-7313893
 # Deep nested sections - Frontiers
 5987773

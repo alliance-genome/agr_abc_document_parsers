@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from agr_abc_document_parsers.models import Document, Section
+from agr_abc_document_parsers.models import Document, Figure, Section, Table
 
 # ---------------------------------------------------------------------------
 # Inline Markdown stripping
@@ -106,19 +106,24 @@ def extract_plain_text(
     _collect_sections_text(doc.sections, parts)
 
     for fig in doc.figures:
-        if fig.caption:
-            parts.append(strip_markdown_formatting(fig.caption))
+        _collect_figure_text(fig, parts)
 
     if doc.acknowledgments:
+        parts.append("Acknowledgments")
         parts.append(strip_markdown_formatting(doc.acknowledgments))
 
     if doc.funding_statement:
+        parts.append("Funding")
         parts.append(strip_markdown_formatting(doc.funding_statement))
-    for note in doc.author_notes:
-        parts.append(strip_markdown_formatting(note))
+    if doc.author_notes:
+        parts.append("Author Notes")
+        for note in doc.author_notes:
+            parts.append(strip_markdown_formatting(note))
     if doc.competing_interests:
+        parts.append("Competing Interests")
         parts.append(strip_markdown_formatting(doc.competing_interests))
     if doc.data_availability:
+        parts.append("Data Availability Statement")
         parts.append(strip_markdown_formatting(doc.data_availability))
 
     _collect_sections_text(doc.back_matter, parts)
@@ -181,6 +186,37 @@ def extract_sentences(
 # ---------------------------------------------------------------------------
 
 
+def _collect_figure_text(fig: Figure, parts: list[str]) -> None:
+    """Collect plain text from a figure, including label and caption."""
+    text_parts: list[str] = []
+    if fig.label:
+        text_parts.append(fig.label.rstrip(".:").strip())
+    if fig.caption:
+        text_parts.append(strip_markdown_formatting(fig.caption))
+    if text_parts:
+        parts.append(" ".join(text_parts))
+
+
+def _collect_table_text(table: Table, parts: list[str]) -> None:
+    """Collect plain text from a table, including label, caption, and cell text."""
+    if table.label or table.caption:
+        text_parts: list[str] = []
+        label = table.label.rstrip(".:").strip() if table.label else ""
+        if label:
+            text_parts.append(label)
+        if table.caption:
+            text_parts.append(strip_markdown_formatting(table.caption))
+        parts.append(" ".join(text_parts))
+    for row in table.rows:
+        for cell in row:
+            cell_text = cell.text.strip()
+            if cell_text:
+                parts.append(strip_markdown_formatting(cell_text))
+    if table.foot_notes:
+        for fn in table.foot_notes:
+            parts.append(strip_markdown_formatting(fn))
+
+
 def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
     """Recursively collect plain text from sections."""
     for section in sections:
@@ -191,12 +227,10 @@ def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
             parts.append(strip_markdown_formatting(para.text))
 
         for fig in section.figures:
-            if fig.caption:
-                parts.append(strip_markdown_formatting(fig.caption))
+            _collect_figure_text(fig, parts)
 
         for table in section.tables:
-            if table.caption:
-                parts.append(strip_markdown_formatting(table.caption))
+            _collect_table_text(table, parts)
 
         for formula in section.formulas:
             if formula.text:
