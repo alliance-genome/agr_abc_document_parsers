@@ -41,6 +41,8 @@ class Paragraph:
 class Figure:
     label: str = ""       # "Figure 1" or "Fig. 1"
     caption: str = ""     # figDesc text
+    alt_text: str = ""    # alternative text from <alt-text> / <graphic>
+    attrib: str = ""      # attribution / source text from <attrib>
     graphic_url: str = ""  # image ref (preserved for downstream; not in Markdown)
 
 

@@ -187,7 +187,7 @@ def extract_sentences(
 
 
 def _collect_figure_text(fig: Figure, parts: list[str]) -> None:
-    """Collect plain text from a figure, including label and caption."""
+    """Collect plain text from a figure, including label, caption, and alt-text."""
     text_parts: list[str] = []
     if fig.label:
         text_parts.append(fig.label.rstrip(".:").strip())
@@ -195,6 +195,10 @@ def _collect_figure_text(fig: Figure, parts: list[str]) -> None:
         text_parts.append(strip_markdown_formatting(fig.caption))
     if text_parts:
         parts.append(" ".join(text_parts))
+    if fig.alt_text:
+        parts.append(strip_markdown_formatting(fig.alt_text))
+    if fig.attrib:
+        parts.append(strip_markdown_formatting(fig.attrib))
 
 
 def _collect_table_text(table: Table, parts: list[str]) -> None:

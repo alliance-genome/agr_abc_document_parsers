@@ -268,7 +268,7 @@ def _emit_list(lst: ListBlock, lines: list[str]) -> None:
 
 
 def _emit_figure(fig: Figure, lines: list[str]) -> None:
-    """Emit a single figure caption."""
+    """Emit a single figure caption and optional alt-text."""
     label = fig.label.rstrip(".:").strip()
     if label:
         if fig.caption:
@@ -278,8 +278,15 @@ def _emit_figure(fig: Figure, lines: list[str]) -> None:
     elif fig.caption:
         lines.append(fig.caption)
     else:
-        return
+        if not fig.alt_text and not fig.attrib:
+            return
     lines.append("")
+    if fig.alt_text:
+        lines.append(fig.alt_text)
+        lines.append("")
+    if fig.attrib:
+        lines.append(fig.attrib)
+        lines.append("")
 
 
 def _emit_doc_level_figures(doc: Document, lines: list[str]) -> None:

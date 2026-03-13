@@ -881,7 +881,21 @@ def pytest_generate_tests(metafunc):
             seen.add(pid)
             all_ids.append(pid)
 
-    metafunc.parametrize("pmcid", all_ids, ids=[f"PMC{p}" for p in all_ids])
+    # Filter out cached articles that lack reference text (untestable).
+    # New articles fetched for the first time are kept — they may succeed.
+    testable = []
+    for pid in all_ids:
+        cache_dir = _CACHE_DIR / pid
+        if cache_dir.exists():
+            xml_ok = (cache_dir / "article.xml").exists()
+            txt_ok = (cache_dir / "reference.txt").exists()
+            if xml_ok and not txt_ok:
+                continue  # cached but no PMC text — skip
+        testable.append(pid)
+
+    metafunc.parametrize(
+        "pmcid", testable, ids=[f"PMC{p}" for p in testable],
+    )
 
 
 @pytest.fixture(scope="session")
@@ -907,11 +921,12 @@ def pmc_results():
     # Write report after all tests complete
     report_path = _CACHE_DIR / "report.json"
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    testable = [r for r in results if r["verdict"] != "SKIP"]
     report = {
-        "total_articles": len(results),
-        "passed": sum(1 for r in results if r["verdict"] == "PASS"),
-        "failed": sum(1 for r in results if r["verdict"] == "FAIL"),
-        "errors": sum(1 for r in results if r["verdict"] == "ERROR"),
+        "total_articles": len(testable),
+        "passed": sum(1 for r in testable if r["verdict"] == "PASS"),
+        "failed": sum(1 for r in testable if r["verdict"] == "FAIL"),
+        "errors": sum(1 for r in testable if r["verdict"] == "ERROR"),
         "skipped": sum(1 for r in results if r["verdict"] == "SKIP"),
         "articles": results,
     }

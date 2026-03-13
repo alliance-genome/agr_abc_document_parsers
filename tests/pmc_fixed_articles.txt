@@ -25,3 +25,13 @@
 12975773
 # Table inside <alternatives> wrapper - Elsevier
 12976086
+# Figure alt-text extraction - PLOS Pathogens
+12977481
+# Figure attrib (caption footnotes) - Taylor & Francis
+12977254
+# Disp-formula paragraph splitting + bio in back - RSC
+12915500
+# Table footnotes as bare <p> in table-wrap-foot - Springer
+12976225
+# Boxed-text with lists at body level - OUP
+12978534

@@ -78,6 +78,7 @@ def parse_jats(
     # Dedicated back-matter fields (extracted BEFORE generic back_matter
     # to allow deduplication — see _parse_back_sections skip logic)
     doc.funding, doc.funding_statement = _parse_funding(root)
+    _extract_funding_body_sections(doc)
     doc.author_notes = _parse_author_notes_field(root)
     doc.competing_interests = _parse_competing_interests(root)
     doc.data_availability = _parse_data_availability(root)
@@ -394,6 +395,33 @@ def _parse_funding(
     return entries, statement
 
 
+def _extract_funding_body_sections(doc: Document) -> None:
+    """Move body sections named "Funding" into doc.funding_statement.
+
+    Some articles have a ``<sec>`` in the body titled "Funding" that
+    duplicates the structured ``<funding-group>`` from article-meta.
+    To avoid duplicate ``## Funding`` headings in Markdown (which causes
+    content loss on round-trip), merge these into funding_statement.
+    """
+    _FUNDING_HEADINGS = {"funding", "funding statement"}
+    remaining: list[Section] = []
+    extra_statements: list[str] = []
+    for sec in doc.sections:
+        if sec.heading.lower().strip() in _FUNDING_HEADINGS:
+            for p in sec.paragraphs:
+                if p.text:
+                    extra_statements.append(p.text)
+        else:
+            remaining.append(sec)
+    if extra_statements:
+        doc.sections = remaining
+        parts = []
+        if doc.funding_statement:
+            parts.append(doc.funding_statement)
+        parts.extend(extra_statements)
+        doc.funding_statement = "\n\n".join(parts)
+
+
 def _parse_author_notes_field(root: etree._Element) -> list[str]:
     """Parse ``<author-notes>`` from article-meta into flat strings.
 
@@ -564,6 +592,8 @@ def _parse_body(root: etree._Element) -> list[Section]:
             preamble.formulas.append(_parse_formula(child))
         elif tag == "list":
             preamble.lists.append(_parse_list(child))
+        elif tag in _SEC_BLOCK_TAGS:
+            _dispatch_sec_block(child, tag, preamble)
 
     # Flush trailing preamble
     if (preamble.paragraphs or preamble.figures
@@ -684,24 +714,75 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
         section.paragraphs.append(_parse_paragraph(p_elem))
         return
 
-    # Slow path — split around embedded block elements
+    # Slow path — split around embedded block elements.
+    # Accumulate text+refs into segments, flushing at each block boundary.
+    parts: list[str] = []
+    refs: list[InlineRef] = []
+
+    def _flush() -> None:
+        text = re.sub(r"\s+", " ", "".join(parts)).strip()
+        if text:
+            section.paragraphs.append(Paragraph(text=text, refs=list(refs)))
+        parts.clear()
+        refs.clear()
+
+    def _collect_inline(child: etree._Element) -> None:
+        tag = etree.QName(child.tag).localname if isinstance(
+            child.tag, str
+        ) else ""
+        if tag == "xref":
+            ref_text = all_text(child)
+            rid = child.get("rid", "")
+            if ref_text:
+                refs.append(InlineRef(text=ref_text, target=rid))
+                parts.append(ref_text)
+        elif tag == "ext-link":
+            link_text = all_text(child)
+            href = child.get(
+                "{http://www.w3.org/1999/xlink}href", ""
+            )
+            if not href:
+                href = child.get("href", "")
+            if link_text and href and link_text != href:
+                parts.append(f"[{link_text}]({href})")
+            elif href:
+                parts.append(href)
+            elif link_text:
+                parts.append(link_text)
+        elif tag in _INLINE_FMT:
+            inner = _inline_text(child)
+            if inner:
+                pre, suf = _INLINE_FMT[tag]
+                parts.append(f"{pre}{inner}{suf}")
+        else:
+            parts.append(all_text(child))
+
+    if p_elem.text:
+        parts.append(p_elem.text)
+
     for child in p_elem:
         tag = etree.QName(child.tag).localname if isinstance(
             child.tag, str
         ) else ""
-        if tag == "fig":
-            section.figures.append(_parse_fig(child))
-        elif tag == "table-wrap":
-            section.tables.append(_parse_table_wrap(child))
-        elif tag == "disp-formula":
-            section.formulas.append(_parse_formula(child))
-        elif tag == "list":
-            section.lists.append(_parse_list(child))
 
-    # Emit the paragraph text (with block elements excluded)
-    para = _parse_paragraph(p_elem, skip_tags=_BLOCK_TAGS)
-    if para.text:
-        section.paragraphs.append(para)
+        if tag in _BLOCK_TAGS:
+            _flush()
+            if tag == "fig":
+                section.figures.append(_parse_fig(child))
+            elif tag == "table-wrap":
+                section.tables.append(_parse_table_wrap(child))
+            elif tag == "disp-formula":
+                section.formulas.append(_parse_formula(child))
+            elif tag == "list":
+                section.lists.append(_parse_list(child))
+            if child.tail:
+                parts.append(child.tail)
+        else:
+            _collect_inline(child)
+            if child.tail:
+                parts.append(child.tail)
+
+    _flush()
 
 
 _INLINE_FMT: dict[str, tuple[str, str]] = {
@@ -816,6 +897,19 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
             parts.append(_inline_text(p).strip())
         fig.caption = " ".join(p for p in parts if p)
 
+    # Alt-text: may appear as direct child of <fig> or inside <graphic>
+    alt_elem = fig_elem.find("alt-text")
+    if alt_elem is None:
+        graphic_elem = fig_elem.find("graphic")
+        if graphic_elem is not None:
+            alt_elem = graphic_elem.find("alt-text")
+    if alt_elem is not None:
+        fig.alt_text = all_text(alt_elem).strip()
+
+    attrib_elem = fig_elem.find("attrib")
+    if attrib_elem is not None:
+        fig.attrib = _inline_text(attrib_elem).strip()
+
     graphic_elem = fig_elem.find("graphic")
     if graphic_elem is not None:
         # xlink:href attribute — try with and without namespace
@@ -876,12 +970,20 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
                     table.rows.append(row)
 
     # Table footnotes from <table-wrap-foot>
+    # Some articles use <fn> elements, others use bare <p> elements.
     foot = tw_elem.find("table-wrap-foot")
     if foot is not None:
-        for fn in foot.findall(".//fn"):
-            fn_text = all_text(fn)
-            if fn_text:
-                table.foot_notes.append(fn_text)
+        fn_elems = foot.findall(".//fn")
+        if fn_elems:
+            for fn in fn_elems:
+                fn_text = all_text(fn)
+                if fn_text:
+                    table.foot_notes.append(fn_text)
+        else:
+            for p in foot.findall("p"):
+                p_text = all_text(p)
+                if p_text:
+                    table.foot_notes.append(p_text)
 
     return table
 
@@ -943,23 +1045,67 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
 
     Each list-item may contain multiple <p> elements.  All paragraphs within
     a single list-item are joined with newlines into one item string so that
-    no body text is lost.
+    no body text is lost.  Nested ``<list>`` children are flattened into the
+    parent list.  Block elements (``<disp-formula>`` etc.) inside ``<p>``
+    are skipped to avoid LaTeX noise.
     """
     list_type = list_elem.get("list-type", "")
     ordered = list_type in ("order", "ordered", "number")
 
     items: list[str] = []
     for item_elem in list_elem.findall("list-item"):
+        # Prepend explicit <label> if present (e.g., "1.", "a)")
+        label_elem = item_elem.find("label")
+        label_prefix = all_text(label_elem).strip() + " " if (
+            label_elem is not None and all_text(label_elem).strip()
+        ) else ""
         paras = item_elem.findall("p")
         if paras:
-            parts = [all_text(p) for p in paras]
+            parts = [_p_text_skip_blocks(p) for p in paras]
             item_text = "\n".join(t for t in parts if t)
         else:
             item_text = all_text(item_elem)
         if item_text:
-            items.append(item_text)
+            items.append(label_prefix + item_text)
+        # Flatten nested lists
+        for nested in item_elem.findall("list"):
+            nested_block = _parse_list(nested)
+            items.extend(nested_block.items)
 
     return ListBlock(items=items, ordered=ordered)
+
+
+def _p_text_skip_blocks(p_elem: etree._Element) -> str:
+    """Extract text from a <p>, skipping LaTeX formula content.
+
+    Formula elements containing ``<tex-math>`` produce LaTeX noise.
+    This helper skips such formula *content* but preserves their tail text
+    (which is regular prose).  Formulas without ``<tex-math>`` (plain text
+    or MathML) are included via ``all_text()``.
+    """
+    parts: list[str] = []
+    if p_elem.text:
+        parts.append(p_elem.text)
+    for child in p_elem:
+        tag = etree.QName(child.tag).localname if isinstance(
+            child.tag, str
+        ) else ""
+        if tag == "disp-formula":
+            # Only skip content if it contains tex-math (LaTeX noise)
+            if child.find(".//tex-math") is not None:
+                pass  # skip LaTeX content, keep tail
+            else:
+                parts.append(all_text(child))
+        elif tag in _INLINE_FMT:
+            inner = _inline_text(child)
+            if inner:
+                pre, suf = _INLINE_FMT[tag]
+                parts.append(f"{pre}{inner}{suf}")
+        else:
+            parts.append(all_text(child))
+        if child.tail:
+            parts.append(child.tail)
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
 
 
 def _parse_supplementary(elem: etree._Element, section: Section) -> None:
@@ -990,16 +1136,31 @@ def _parse_supplementary(elem: etree._Element, section: Section) -> None:
 def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
     """Parse <boxed-text> — emit its content as regular paragraphs."""
     title_elem = elem.find("title")
+    if title_elem is None:
+        title_elem = elem.find("label")
     if title_elem is not None:
         title_text = all_text(title_elem)
         if title_text:
             section.paragraphs.append(
                 Paragraph(text=f"**{title_text}**")
             )
-    for p in elem.findall(".//p"):
-        p_text = all_text(p)
-        if p_text:
-            section.paragraphs.append(Paragraph(text=p_text))
+    for child in elem:
+        tag = etree.QName(child.tag).localname if isinstance(
+            child.tag, str
+        ) else ""
+        if tag == "p":
+            _collect_from_p(child, section)
+        elif tag == "list":
+            section.lists.append(_parse_list(child))
+        elif tag == "sec":
+            section.subsections.append(_parse_sec(child, level=2))
+        elif tag in ("fig", "table-wrap", "disp-formula"):
+            if tag == "fig":
+                section.figures.append(_parse_fig(child))
+            elif tag == "table-wrap":
+                section.tables.append(_parse_table_wrap(child))
+            else:
+                section.formulas.append(_parse_formula(child))
 
 
 def _parse_def_list(elem: etree._Element, section: Section) -> None:
@@ -1196,6 +1357,14 @@ def _parse_back_sections(
             _parse_glossary(child, section)
             if (section.paragraphs or section.lists
                     or section.heading):
+                sections.append(section)
+        elif tag == "bio":
+            section = Section(level=1)
+            for p in child.findall(".//p"):
+                p_text = all_text(p)
+                if p_text:
+                    section.paragraphs.append(Paragraph(text=p_text))
+            if section.paragraphs:
                 sections.append(section)
 
     return sections

@@ -442,10 +442,10 @@ class TestJatsParser:
         assert sec.tables[0].label == "Table 1"
         assert sec.tables[0].rows[0][0].text == "Gene"
         assert sec.tables[0].rows[1][0].text == "BRCA1"
-        # Surrounding paragraph text preserved (block elements stripped)
-        assert len(sec.paragraphs) == 1
+        # Text around block elements split into separate paragraphs
+        assert len(sec.paragraphs) == 2
         assert "See Table 1" in sec.paragraphs[0].text
-        assert "More text" in sec.paragraphs[0].text
+        assert "More text" in sec.paragraphs[1].text
 
     def test_parse_citation_alternatives(self):
         """References wrapped in <citation-alternatives>."""
