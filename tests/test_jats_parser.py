@@ -3566,3 +3566,314 @@ class TestTableCellAlignment:
         assert table.rows[0][0].align == "center"
         assert table.rows[0][1].align == "center"
         assert table.rows[0][2].align == ""
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: multiple <table-wrap-foot> elements per table
+# ---------------------------------------------------------------------------
+
+class TestMultipleTableWrapFoot:
+    """Verify all <table-wrap-foot> elements are captured, not just the first."""
+
+    def test_multiple_table_wrap_foot(self):
+        xml = b"""<article><body><sec>
+          <table-wrap>
+            <table><tbody>
+              <tr><th>A</th><th>B</th></tr>
+              <tr><td>1</td><td>2</td></tr>
+            </tbody></table>
+            <table-wrap-foot>
+              <fn><p>First footnote</p></fn>
+            </table-wrap-foot>
+            <table-wrap-foot>
+              <fn><p>Second footnote</p></fn>
+              <fn><p>Third footnote</p></fn>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.foot_notes) == 3
+        assert "First footnote" in table.foot_notes[0]
+        assert "Second footnote" in table.foot_notes[1]
+        assert "Third footnote" in table.foot_notes[2]
+
+    def test_multiple_foot_with_bare_p(self):
+        """Mixed: one foot with <fn>, another with bare <p>."""
+        xml = b"""<article><body><sec>
+          <table-wrap>
+            <table><tbody><tr><td>X</td></tr></tbody></table>
+            <table-wrap-foot>
+              <fn><p>Footnote A</p></fn>
+            </table-wrap-foot>
+            <table-wrap-foot>
+              <p>Bare paragraph footnote</p>
+            </table-wrap-foot>
+          </table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.foot_notes) == 2
+        assert "Footnote A" in table.foot_notes[0]
+        assert "Bare paragraph" in table.foot_notes[1]
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: preamble flush with subsections/notes from boxed-text
+# ---------------------------------------------------------------------------
+
+class TestPreambleFlushSubsections:
+    """Boxed-text content before first <sec> must not be lost."""
+
+    def test_boxed_text_before_first_sec(self):
+        """<boxed-text> with <sec> children before body <sec>."""
+        xml = b"""<article><body>
+          <boxed-text position="float">
+            <sec><title>Key findings</title>
+              <p>Finding one.</p>
+            </sec>
+            <sec><title>What is new</title>
+              <p>New thing.</p>
+            </sec>
+          </boxed-text>
+          <sec><title>Introduction</title>
+            <p>Intro text.</p>
+          </sec>
+        </body></article>"""
+        doc = parse_jats(xml)
+        # Preamble section should be flushed with subsections
+        assert len(doc.sections) >= 2
+        preamble = doc.sections[0]
+        assert len(preamble.subsections) == 2
+        assert preamble.subsections[0].heading == "Key findings"
+        assert preamble.subsections[1].heading == "What is new"
+        # Body section follows
+        intro = doc.sections[1]
+        assert intro.heading == "Introduction"
+
+    def test_boxed_text_caption_title(self):
+        """<boxed-text> with <caption><title> structure."""
+        xml = b"""<article><body>
+          <boxed-text position="float">
+            <caption><title>Highlight box</title></caption>
+            <sec><title>Summary</title>
+              <p>Summary text.</p>
+            </sec>
+          </boxed-text>
+          <sec><title>Methods</title><p>Methods text.</p></sec>
+        </body></article>"""
+        doc = parse_jats(xml)
+        preamble = doc.sections[0]
+        # Caption title emitted as bold paragraph
+        assert any("Highlight box" in p.text for p in preamble.paragraphs)
+        assert preamble.subsections[0].heading == "Summary"
+
+    def test_trailing_boxed_text_flush(self):
+        """Boxed-text after last <sec> is flushed."""
+        xml = b"""<article><body>
+          <sec><title>Results</title><p>Result text.</p></sec>
+          <boxed-text>
+            <sec><title>Takeaway</title><p>Key point.</p></sec>
+          </boxed-text>
+        </body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.sections) == 2
+        trailing = doc.sections[1]
+        assert trailing.subsections[0].heading == "Takeaway"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: <sec> children inside <ack>
+# ---------------------------------------------------------------------------
+
+class TestAckSubSections:
+    """Sections nested inside <ack> become back_matter entries."""
+
+    def test_sec_inside_ack(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <ack><p>We thank the reviewers.</p>
+              <sec><title>CRediT authorship</title>
+                <p>Alice: Writing. Bob: Review.</p>
+              </sec>
+              <sec><title>Ethical considerations</title>
+                <p>Ethics approval was obtained.</p>
+              </sec>
+            </ack>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "We thank the reviewers" in doc.acknowledgments
+        # Sections from <ack> appear in back_matter
+        headings = [s.heading for s in doc.back_matter]
+        assert "CRediT authorship" in headings
+        assert "Ethical considerations" in headings
+
+    def test_ack_without_sec(self):
+        """No <sec> inside <ack> — back_matter unaffected."""
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back><ack><p>Thanks.</p></ack></back>
+        </article>"""
+        doc = parse_jats(xml)
+        assert "Thanks" in doc.acknowledgments
+        ack_headings = [
+            s.heading for s in doc.back_matter
+            if "CRediT" in s.heading or "Ethical" in s.heading
+        ]
+        assert ack_headings == []
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: nested <notes> inside <notes> in back-matter
+# ---------------------------------------------------------------------------
+
+class TestNestedNotes:
+    """Nested <notes> elements become subsections."""
+
+    def test_declarations_with_nested_notes(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <notes>
+              <title>Declarations</title>
+              <notes>
+                <title>Ethics approval</title>
+                <p>Approved by IRB.</p>
+              </notes>
+              <notes>
+                <title>Consent for publication</title>
+                <p>All consented.</p>
+              </notes>
+            </notes>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        decl = [s for s in doc.back_matter if s.heading == "Declarations"]
+        assert len(decl) == 1
+        assert len(decl[0].subsections) == 2
+        assert decl[0].subsections[0].heading == "Ethics approval"
+        assert decl[0].subsections[1].heading == "Consent for publication"
+        assert any(
+            "Approved by IRB" in p.text
+            for p in decl[0].subsections[0].paragraphs
+        )
+
+    def test_notes_with_direct_p_and_nested(self):
+        """Notes with both direct <p> and nested <notes>."""
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <back>
+            <notes>
+              <title>Disclosures</title>
+              <p>General disclosure.</p>
+              <notes>
+                <title>COI</title>
+                <p>None declared.</p>
+              </notes>
+            </notes>
+          </back>
+        </article>"""
+        doc = parse_jats(xml)
+        disc = [s for s in doc.back_matter if s.heading == "Disclosures"]
+        assert len(disc) == 1
+        # Direct paragraph
+        assert any("General disclosure" in p.text for p in disc[0].paragraphs)
+        # Nested subsection
+        assert disc[0].subsections[0].heading == "COI"
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: <boxed-text> in <floats-group>
+# ---------------------------------------------------------------------------
+
+class TestBoxedTextInFloatsGroup:
+    """Boxed-text in floats-group becomes back_matter."""
+
+    def test_boxed_text_floats_group(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+          <floats-group>
+            <boxed-text position="float">
+              <caption><title>Key points</title></caption>
+              <list list-type="bullet">
+                <list-item><p>Point one.</p></list-item>
+                <list-item><p>Point two.</p></list-item>
+              </list>
+            </boxed-text>
+          </floats-group>
+        </article>"""
+        doc = parse_jats(xml)
+        # Boxed-text content should be in back_matter
+        bm_with_lists = [
+            s for s in doc.back_matter if s.lists
+        ]
+        assert len(bm_with_lists) >= 1
+        items = bm_with_lists[0].lists[0].items
+        assert "Point one." in items[0]
+        assert "Point two." in items[1]
+
+
+# ---------------------------------------------------------------------------
+# Bug fix: mixed <p> and <sec> in abstract
+# ---------------------------------------------------------------------------
+
+class TestMixedAbstract:
+    """Abstract with both direct <p> and <sec> children."""
+
+    def test_abstract_p_then_sec(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+            <abstract>
+              <p>Lead paragraph of the abstract.</p>
+              <sec><title>Methods</title>
+                <p>We did X and Y.</p>
+              </sec>
+              <sec><title>Results</title>
+                <p>We found Z.</p>
+              </sec>
+            </abstract>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.abstract) == 3
+        assert doc.abstract[0].text == "Lead paragraph of the abstract."
+        assert "Methods:" in doc.abstract[1].text
+        assert "Results:" in doc.abstract[2].text
+
+    def test_abstract_sec_then_p(self):
+        """Reverse order: <sec> first, then bare <p>."""
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+            <abstract>
+              <sec><title>Background</title>
+                <p>Background info.</p>
+              </sec>
+              <p>Trailing abstract paragraph.</p>
+            </abstract>
+          </article-meta></front>
+          <body><sec><title>Intro</title><p>Text.</p></sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.abstract) == 2
+        assert "Background:" in doc.abstract[0].text
+        assert doc.abstract[1].text == "Trailing abstract paragraph."

@@ -75,7 +75,8 @@ def parse_jats(
 
     doc.sections = _parse_body(root)
     doc.references = _parse_bibliography(root)
-    doc.acknowledgments = _parse_acknowledgments(root)
+    ack_sections: list[Section] = []
+    doc.acknowledgments = _parse_acknowledgments(root, ack_sections)
 
     # Dedicated back-matter fields (extracted BEFORE generic back_matter
     # to allow deduplication — see _parse_back_sections skip logic)
@@ -85,9 +86,10 @@ def parse_jats(
     doc.competing_interests = _parse_competing_interests(root)
     doc.data_availability = _parse_data_availability(root)
 
-    # Back matter: appendices + additional sections (fn-group, notes, etc.)
+    # Back matter: appendices + ack sub-sections + additional sections.
     # Elements already captured in dedicated fields above are skipped.
     back_matter = _parse_appendices(root)
+    back_matter.extend(ack_sections)
     back_matter.extend(_parse_back_sections(root, doc))
     doc.back_matter = back_matter
 
@@ -330,24 +332,29 @@ def _find_main_abstract(
 def _parse_abstract_content(
     abstract_elem: etree._Element,
 ) -> list[Paragraph]:
-    """Parse paragraphs from an ``<abstract>`` element."""
+    """Parse paragraphs from an ``<abstract>`` element.
+
+    Handles mixed content where direct ``<p>`` and ``<sec>`` children
+    are interleaved (e.g. a lead paragraph followed by structured
+    sections).
+    """
     paragraphs: list[Paragraph] = []
 
-    # Check for structured abstract with <sec> children
-    secs = abstract_elem.findall("sec")
-    if secs:
-        for sec in secs:
-            title_elem = sec.find("title")
-            sec_title = all_text(title_elem) if title_elem is not None else ""
-            for p_elem in sec.findall("p"):
+    for child in abstract_elem:
+        tag = (etree.QName(child.tag).localname
+               if isinstance(child.tag, str) else "")
+        if tag == "sec":
+            title_elem = child.find("title")
+            sec_title = (all_text(title_elem)
+                         if title_elem is not None else "")
+            for p_elem in child.findall("p"):
                 para = _parse_paragraph(p_elem)
                 if para.text and sec_title:
                     para.text = f"**{sec_title}:** {para.text}"
                 if para.text:
                     paragraphs.append(para)
-    else:
-        for p_elem in abstract_elem.findall(".//p"):
-            para = _parse_paragraph(p_elem)
+        elif tag == "p":
+            para = _parse_paragraph(child)
             if para.text:
                 paragraphs.append(para)
 
@@ -715,7 +722,8 @@ def _parse_body(root: etree._Element) -> list[Section]:
             # Flush any accumulated preamble content
             if (preamble.paragraphs or preamble.figures
                     or preamble.tables or preamble.lists
-                    or preamble.formulas):
+                    or preamble.formulas or preamble.subsections
+                    or preamble.notes):
                 sections.append(preamble)
                 preamble = Section(level=1)
             sections.append(_parse_sec(child, level=1))
@@ -741,7 +749,8 @@ def _parse_body(root: etree._Element) -> list[Section]:
     # Flush trailing preamble
     if (preamble.paragraphs or preamble.figures
             or preamble.tables or preamble.lists
-            or preamble.formulas):
+            or preamble.formulas or preamble.subsections
+            or preamble.notes):
         sections.append(preamble)
 
     return sections
@@ -1271,9 +1280,9 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         table.rows = _expand_rowspans(raw_rows, raw_spans)
 
     # Table footnotes from <table-wrap-foot>
-    # Some articles use <fn> elements, others use bare <p> elements.
-    foot = tw_elem.find("table-wrap-foot")
-    if foot is not None:
+    # Some articles have multiple <table-wrap-foot> elements per table.
+    # Some use <fn> elements, others use bare <p> elements.
+    for foot in tw_elem.findall("table-wrap-foot"):
         fn_elems = foot.findall(".//fn")
         if fn_elems:
             for fn in fn_elems:
@@ -1544,6 +1553,8 @@ def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
     title_elem = elem.find("title")
     if title_elem is None:
         title_elem = elem.find("label")
+    if title_elem is None:
+        title_elem = elem.find("caption/title")
     if title_elem is not None:
         title_text = all_text(title_elem)
         if title_text:
@@ -1617,8 +1628,15 @@ def _parse_glossary(
             section.paragraphs.append(Paragraph(text=p_text))
 
 
-def _parse_acknowledgments(root: etree._Element) -> str:
-    """Extract acknowledgments from back/ack."""
+def _parse_acknowledgments(
+    root: etree._Element,
+    ack_sections: list[Section] | None = None,
+) -> str:
+    """Extract acknowledgments from back/ack.
+
+    Any ``<sec>`` children within ``<ack>`` (e.g. CRediT authorship,
+    ethical considerations) are appended to *ack_sections* if provided.
+    """
     back = root.find("back")
     if back is None:
         back = root.find(".//back")
@@ -1627,10 +1645,16 @@ def _parse_acknowledgments(root: etree._Element) -> str:
         return ""
 
     parts: list[str] = []
-    for p in ack.findall(".//p"):
+    for p in ack.findall("./p"):
         p_text = all_text(p)
         if p_text:
             parts.append(p_text)
+
+    # <sec> children within <ack> (author contributions, ethics, etc.)
+    if ack_sections is not None:
+        for sec in ack.findall("sec"):
+            ack_sections.append(_parse_sec(sec, level=1))
+
     return "\n\n".join(parts)
 
 
@@ -1742,11 +1766,29 @@ def _parse_back_sections(
             title_elem = child.find("title")
             if title_elem is not None:
                 section.heading = all_text(title_elem)
-            for p in child.findall(".//p"):
+            # Direct <p> children only (not descendants inside nested notes)
+            for p in child.findall("./p"):
                 p_text = all_text(p)
                 if p_text:
                     section.paragraphs.append(Paragraph(text=p_text))
-            if section.paragraphs or section.heading:
+            # Nested <notes> and <sec> children → subsections
+            for sub_notes in child.findall("./notes"):
+                sub_sec = Section(level=2)
+                sub_title = sub_notes.find("title")
+                if sub_title is not None:
+                    sub_sec.heading = all_text(sub_title)
+                for p in sub_notes.findall(".//p"):
+                    p_text = all_text(p)
+                    if p_text:
+                        sub_sec.paragraphs.append(Paragraph(text=p_text))
+                if sub_sec.paragraphs or sub_sec.heading:
+                    section.subsections.append(sub_sec)
+            for sub_sec_elem in child.findall("./sec"):
+                section.subsections.append(
+                    _parse_sec(sub_sec_elem, level=2)
+                )
+            if (section.paragraphs or section.heading
+                    or section.subsections):
                 sections.append(section)
         elif tag == "supplementary-material":
             section = Section(level=1)
@@ -1796,6 +1838,12 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             doc.figures.append(_parse_fig(child))
         elif tag == "table-wrap":
             doc.tables.append(_parse_table_wrap(child))
+        elif tag == "boxed-text":
+            section = Section(level=1)
+            _parse_boxed_text(child, section)
+            if (section.paragraphs or section.subsections
+                    or section.lists):
+                doc.back_matter.append(section)
 
 
 def _parse_bibliography(root: etree._Element) -> list[Reference]:
