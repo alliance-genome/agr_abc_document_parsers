@@ -92,8 +92,11 @@ disallow_untyped_defs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["webtest: tests that require network access to PMC (deselected by default)"]
-addopts = "-m 'not webtest'"
+markers = [
+    "webtest: tests that require network access to PMC (deselected by default)",
+    "teitest: tests that require access to Alliance prod DB and S3 (deselected by default)",
+]
+addopts = "-m 'not webtest and not teitest'"
 
 [tool.coverage.run]
 source = ["src/agr_abc_document_parsers"]

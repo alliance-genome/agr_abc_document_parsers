@@ -26,6 +26,11 @@ env/
 htmlcov/
 .mypy_cache/
 tests/.pmcdata/
+tests/.teidata/
+
+# Environment
+.env
+.env.*
 
 # OS
 .DS_Store

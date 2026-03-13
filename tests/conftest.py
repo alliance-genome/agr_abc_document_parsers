@@ -15,6 +15,10 @@ def pytest_addoption(parser):
         "--refresh-cache", action="store_true", default=False,
         help="Force re-download of cached PMC data",
     )
+    parser.addoption(
+        "--tei-count", type=int, default=20,
+        help="Number of TEI files to test from prod DB (teitest only)",
+    )
 
 
 def get_ncbi_api_key(request):
