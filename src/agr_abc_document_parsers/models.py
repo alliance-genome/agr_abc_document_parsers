@@ -119,6 +119,8 @@ class Reference:
     pmid: str = ""
     pmcid: str = ""
     ext_links: list[str] = field(default_factory=list)  # URLs from ext-link/ptr
+    comment: str = ""  # free-text annotation (e.g., "In press", "Epub ahead of print")
+    edition: str = ""  # book edition
 
 
 @dataclass

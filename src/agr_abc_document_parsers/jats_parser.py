@@ -101,12 +101,22 @@ def parse_jats(
 def _parse_title(root: etree._Element) -> str:
     """Extract title from article-meta/title-group/article-title.
 
+    Includes subtitle (if present) separated by ": ".
     Preserves inline formatting (italic, bold, sup, sub) as Markdown.
     """
-    title_elem = root.find(".//article-meta/title-group/article-title")
+    title_group = root.find(".//article-meta/title-group")
+    if title_group is None:
+        return ""
+    title_elem = title_group.find("article-title")
     if title_elem is None:
         return ""
-    return _inline_text(title_elem).strip()
+    title = _inline_text(title_elem).strip()
+    subtitle_elem = title_group.find("subtitle")
+    if subtitle_elem is not None:
+        subtitle = _inline_text(subtitle_elem).strip()
+        if subtitle:
+            title = f"{title}: {subtitle}"
+    return title
 
 
 def _parse_doi(root: etree._Element) -> str:
@@ -516,7 +526,11 @@ def _parse_affiliations(root: etree._Element) -> dict[str, str]:
 
 
 def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author]:
-    """Extract authors from contrib-group, resolving affiliations via xref."""
+    """Extract authors from contrib-group, resolving affiliations via xref.
+
+    Handles both personal names (<name>) and group/collaborative
+    authors (<collab>).
+    """
     authors = []
     for contrib in root.findall(
         ".//article-meta/contrib-group/contrib[@contrib-type='author']"
@@ -526,6 +540,11 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
         if name_elem is not None:
             author.surname = text(name_elem.find("surname"))
             author.given_name = text(name_elem.find("given-names"))
+        else:
+            # Group/collaborative author (e.g., consortia)
+            collab_elem = contrib.find("collab")
+            if collab_elem is not None:
+                author.surname = all_text(collab_elem)
 
         email_elem = contrib.find("email")
         if email_elem is not None:
@@ -594,6 +613,8 @@ def _parse_body(root: etree._Element) -> list[Section]:
             preamble.lists.append(_parse_list(child))
         elif tag in _SEC_BLOCK_TAGS:
             _dispatch_sec_block(child, tag, preamble)
+        elif tag in _GROUP_CONTAINER_TAGS:
+            _dispatch_group_container(child, tag, preamble, 1)
 
     # Flush trailing preamble
     if (preamble.paragraphs or preamble.figures
@@ -655,6 +676,27 @@ _SEC_BLOCK_TAGS = frozenset({
     "def-list", "fn-group", "preformat", "glossary",
 })
 
+# Container tags that wrap multiple figures, tables, or formulas.
+_GROUP_CONTAINER_TAGS = frozenset({
+    "fig-group", "table-wrap-group", "disp-formula-group",
+})
+
+
+def _dispatch_group_container(
+    child: etree._Element, tag: str,
+    section: Section, level: int,
+) -> None:
+    """Unpack group containers into their individual elements."""
+    if tag == "fig-group":
+        for fig_elem in child.findall("fig"):
+            section.figures.append(_parse_fig(fig_elem))
+    elif tag == "table-wrap-group":
+        for tw_elem in child.findall("table-wrap"):
+            section.tables.append(_parse_table_wrap(tw_elem))
+    elif tag == "disp-formula-group":
+        for df_elem in child.findall("disp-formula"):
+            section.formulas.append(_parse_formula(df_elem))
+
 
 def _dispatch_sec_child(
     child: etree._Element, tag: str,
@@ -677,6 +719,15 @@ def _dispatch_sec_child(
         section.lists.append(_parse_list(child))
     elif tag in _SEC_BLOCK_TAGS:
         _dispatch_sec_block(child, tag, section)
+    elif tag in _GROUP_CONTAINER_TAGS:
+        _dispatch_group_container(child, tag, section, level)
+    else:
+        # Fallback: extract text from unrecognized block elements
+        # (e.g., <speech>, <verse-group>, <statement>, <code>,
+        # <chem-struct-wrap>, <array>) to prevent silent content loss.
+        fallback_text = all_text(child)
+        if fallback_text:
+            section.paragraphs.append(Paragraph(text=fallback_text))
 
 
 def _parse_sec(sec_elem: etree._Element, level: int) -> Section:
@@ -790,6 +841,9 @@ _INLINE_FMT: dict[str, tuple[str, str]] = {
     "bold": ("**", "**"),
     "sup": ("<sup>", "</sup>"),
     "sub": ("<sub>", "</sub>"),
+    "monospace": ("`", "`"),
+    "strike": ("~~", "~~"),
+    "underline": ("<u>", "</u>"),
 }
 
 
@@ -962,8 +1016,16 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
                 if row:
                     table.rows.append(row)
 
+        # Parse tfoot (footer rows — append as data rows)
+        tfoot = table_elem.find("tfoot")
+        if tfoot is not None:
+            for tr in tfoot.findall("tr"):
+                row = _parse_table_row(tr, is_header=False)
+                if row:
+                    table.rows.append(row)
+
         # Direct tr elements (no thead/tbody)
-        if thead is None and tbody is None:
+        if thead is None and tbody is None and tfoot is None:
             for tr in table_elem.findall("tr"):
                 row = _parse_table_row(tr, is_header=False)
                 if row:
@@ -1416,7 +1478,7 @@ def _find_citation(ref_elem: etree._Element) -> etree._Element | None:
 
     Checks direct children and ``<citation-alternatives>`` wrapper.
     """
-    for tag in ("element-citation", "mixed-citation"):
+    for tag in ("element-citation", "mixed-citation", "nlm-citation"):
         elem = ref_elem.find(tag)
         if elem is not None:
             return elem
@@ -1527,6 +1589,18 @@ def _parse_ref_ids(
         if href:
             ref.ext_links.append(href)
 
+    # <uri> elements (URLs not wrapped in ext-link)
+    for uri_elem in citation.findall("uri"):
+        href = uri_elem.get(
+            "{http://www.w3.org/1999/xlink}href", ""
+        )
+        if not href:
+            href = uri_elem.get("href", "")
+        if not href:
+            href = text(uri_elem)
+        if href:
+            ref.ext_links.append(href)
+
 
 def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
     """Parse a single <ref> element.
@@ -1578,6 +1652,16 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
     conf = citation.find("conf-name")
     if conf is not None:
         ref.conference = all_text(conf)
+
+    # Edition (for books)
+    edition_elem = citation.find("edition")
+    if edition_elem is not None:
+        ref.edition = all_text(edition_elem)
+
+    # Comment (e.g., "In press", "Epub ahead of print")
+    comment_elem = citation.find("comment")
+    if comment_elem is not None:
+        ref.comment = all_text(comment_elem)
 
     # Editors
     _parse_ref_editors(citation, ref)

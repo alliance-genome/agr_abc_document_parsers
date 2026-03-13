@@ -1678,3 +1678,630 @@ class TestTableAlternatives:
         assert len(table.rows) == 2
         assert table.rows[0][0].text == "Drug"
         assert table.rows[1][0].text == "Tetracycline"
+
+
+# -- New inline formatting: monospace, strike, underline --------------------
+
+
+class TestMonospaceFormatting:
+    def test_monospace_inline(self):
+        """<monospace> rendered as backtick code spans."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The gene <monospace>BRCA1</monospace> is important.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "`BRCA1`" in para
+        assert "The gene `BRCA1` is important." == para
+
+    def test_monospace_empty(self):
+        """Empty <monospace> produces no stray backticks."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>Before<monospace></monospace> after.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "`" not in para
+
+
+class TestStrikethroughFormatting:
+    def test_strike_inline(self):
+        """<strike> rendered as GFM strikethrough ~~...~~."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>This is <strike>deleted</strike> text.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "~~deleted~~" in para
+
+    def test_strike_empty(self):
+        """Empty <strike> produces no stray tildes."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>Before<strike></strike> after.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "~~" not in para
+
+
+class TestUnderlineFormatting:
+    def test_underline_inline(self):
+        """<underline> rendered as <u>...</u> HTML."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>This is <underline>underlined</underline> text.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "<u>underlined</u>" in para
+
+    def test_underline_empty(self):
+        """Empty <underline> produces no stray tags."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>Before<underline></underline> after.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "<u>" not in para
+
+
+# -- Subtitle extraction ---------------------------------------------------
+
+
+class TestSubtitleExtraction:
+    def test_title_with_subtitle(self):
+        """<subtitle> appended to title with ': ' separator."""
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Main Title</article-title>
+            <subtitle>A Comprehensive Review</subtitle>
+          </title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.title == "Main Title: A Comprehensive Review"
+
+    def test_title_without_subtitle(self):
+        """No <subtitle> leaves title unchanged."""
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Plain Title</article-title>
+          </title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.title == "Plain Title"
+
+    def test_empty_subtitle_ignored(self):
+        """Empty <subtitle> does not add trailing ': '."""
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Title</article-title>
+            <subtitle>  </subtitle>
+          </title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.title == "Title"
+
+
+# -- Collab authors at article level ---------------------------------------
+
+
+class TestCollabArticleAuthors:
+    def test_collab_author(self):
+        """<collab> in contrib-group captured as author surname."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <collab>The International Human Genome Consortium</collab>
+            </contrib>
+            <contrib contrib-type="author">
+              <name><surname>Smith</surname><given-names>J</given-names></name>
+            </contrib>
+          </contrib-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors) == 2
+        assert doc.authors[0].surname == "The International Human Genome Consortium"
+        assert doc.authors[0].given_name == ""
+        assert doc.authors[1].surname == "Smith"
+
+    def test_collab_only_authors(self):
+        """Article with only collaborative authors."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <collab>ENCODE Project Consortium</collab>
+            </contrib>
+          </contrib-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors) == 1
+        assert doc.authors[0].surname == "ENCODE Project Consortium"
+
+
+# -- NLM citation support --------------------------------------------------
+
+
+class TestNlmCitation:
+    def test_nlm_citation_parsed(self):
+        """<nlm-citation> references parsed like element-citation."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <nlm-citation citation-type="journal">
+              <person-group person-group-type="author">
+                <name><surname>Old</surname><given-names>A</given-names></name>
+              </person-group>
+              <article-title>Legacy reference</article-title>
+              <source>Old Journal</source>
+              <year>2005</year>
+              <volume>10</volume>
+              <fpage>100</fpage>
+              <lpage>110</lpage>
+            </nlm-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.references) == 1
+        ref = doc.references[0]
+        assert "Old" in ref.authors[0]
+        assert ref.title == "Legacy reference"
+        assert ref.journal == "Old Journal"
+        assert ref.year == "2005"
+        assert ref.pages == "100-110"
+
+    def test_nlm_citation_in_alternatives(self):
+        """<nlm-citation> inside <citation-alternatives> wrapper."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <citation-alternatives>
+              <nlm-citation citation-type="journal">
+                <article-title>Alt NLM title</article-title>
+                <source>J</source>
+                <year>2003</year>
+              </nlm-citation>
+            </citation-alternatives>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.references) == 1
+        assert doc.references[0].title == "Alt NLM title"
+
+
+# -- Group container unpacking --------------------------------------------
+
+
+class TestGroupContainers:
+    def test_fig_group_in_section(self):
+        """<fig-group> children unpacked into section.figures."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <p>See figures below.</p>
+          <fig-group>
+            <fig id="f1"><label>Figure 1</label>
+              <caption><p>Panel A.</p></caption></fig>
+            <fig id="f2"><label>Figure 2</label>
+              <caption><p>Panel B.</p></caption></fig>
+          </fig-group>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        assert len(sec.figures) == 2
+        assert sec.figures[0].label == "Figure 1"
+        assert sec.figures[1].label == "Figure 2"
+
+    def test_table_wrap_group_in_section(self):
+        """<table-wrap-group> children unpacked into section.tables."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <table-wrap-group>
+            <table-wrap id="t1"><label>Table 1</label>
+              <table><thead><tr><th>A</th></tr></thead>
+              <tbody><tr><td>1</td></tr></tbody></table>
+            </table-wrap>
+            <table-wrap id="t2"><label>Table 2</label>
+              <table><thead><tr><th>B</th></tr></thead>
+              <tbody><tr><td>2</td></tr></tbody></table>
+            </table-wrap>
+          </table-wrap-group>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        assert len(sec.tables) == 2
+        assert sec.tables[0].label == "Table 1"
+        assert sec.tables[1].label == "Table 2"
+
+    def test_disp_formula_group_in_section(self):
+        """<disp-formula-group> children unpacked into section.formulas."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula-group>
+            <disp-formula id="eq1">E = mc^2</disp-formula>
+            <disp-formula id="eq2">F = ma</disp-formula>
+          </disp-formula-group>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        assert len(sec.formulas) == 2
+        assert "E = mc^2" in sec.formulas[0].text
+        assert "F = ma" in sec.formulas[1].text
+
+    def test_fig_group_at_body_level(self):
+        """<fig-group> as direct child of <body> handled."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body>
+          <fig-group>
+            <fig id="f1"><label>Figure 1</label>
+              <caption><p>Body-level fig.</p></caption></fig>
+          </fig-group>
+        </body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.sections) == 1
+        assert len(doc.sections[0].figures) == 1
+        assert doc.sections[0].figures[0].label == "Figure 1"
+
+
+# -- Fallback text extraction for unknown block elements -------------------
+
+
+class TestFallbackBlockExtraction:
+    def test_unknown_block_text_preserved(self):
+        """Unknown block elements in <sec> have text extracted as paragraph."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Discussion</title>
+          <p>Normal paragraph.</p>
+          <speech><speaker>Dr. Smith</speaker>
+            <p>This is a speech element.</p>
+          </speech>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        all_text_parts = [p.text for p in sec.paragraphs]
+        assert any("Normal paragraph" in t for t in all_text_parts)
+        assert any("Dr. Smith" in t or "speech element" in t
+                    for t in all_text_parts)
+
+    def test_verse_group_text_preserved(self):
+        """<verse-group> text extracted via fallback."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Epigraph</title>
+          <verse-group>
+            <verse-line>Roses are red,</verse-line>
+            <verse-line>Violets are blue.</verse-line>
+          </verse-group>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        all_text_parts = [p.text for p in sec.paragraphs]
+        assert any("Roses" in t for t in all_text_parts)
+
+
+# -- Table tfoot parsing --------------------------------------------------
+
+
+class TestTableTfoot:
+    def test_tfoot_rows_appended(self):
+        """<tfoot> rows appended after tbody rows."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap>
+            <table>
+              <thead><tr><th>Gene</th><th>Value</th></tr></thead>
+              <tbody><tr><td>BRCA1</td><td>2.5</td></tr></tbody>
+              <tfoot><tr><td>Total</td><td>2.5</td></tr></tfoot>
+            </table>
+          </table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 3  # 1 header + 1 data + 1 footer
+        assert table.rows[0][0].is_header is True
+        assert table.rows[1][0].text == "BRCA1"
+        assert table.rows[2][0].text == "Total"
+
+    def test_tfoot_only_table(self):
+        """Table with thead and tfoot but no tbody."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <table-wrap>
+            <table>
+              <thead><tr><th>Col</th></tr></thead>
+              <tfoot><tr><td>Summary</td></tr></tfoot>
+            </table>
+          </table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert len(table.rows) == 2  # 1 header + 1 footer
+        assert table.rows[1][0].text == "Summary"
+
+
+# -- URI in references -----------------------------------------------------
+
+
+class TestRefUriExtraction:
+    def test_uri_element_in_citation(self):
+        """<uri> in citation extracted as ext_link."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Web resource</article-title>
+              <year>2024</year>
+              <uri xmlns:xlink="http://www.w3.org/1999/xlink"
+                   xlink:href="https://example.com/data">Example Data</uri>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert "https://example.com/data" in ref.ext_links
+
+    def test_uri_text_fallback(self):
+        """<uri> with no href uses text content."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Title</article-title>
+              <year>2024</year>
+              <uri>https://example.com/fallback</uri>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert "https://example.com/fallback" in ref.ext_links
+
+    def test_uri_alongside_ext_link(self):
+        """Both <ext-link> and <uri> captured."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Title</article-title>
+              <year>2024</year>
+              <ext-link xmlns:xlink="http://www.w3.org/1999/xlink"
+                        xlink:href="https://example.com/ext">link</ext-link>
+              <uri xmlns:xlink="http://www.w3.org/1999/xlink"
+                   xlink:href="https://example.com/uri">uri</uri>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert len(ref.ext_links) == 2
+        assert "https://example.com/ext" in ref.ext_links
+        assert "https://example.com/uri" in ref.ext_links
+
+
+# -- Edition and comment in references -------------------------------------
+
+
+class TestRefEditionComment:
+    def test_edition_parsed(self):
+        """<edition> captured in Reference.edition."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation publication-type="book">
+              <source>Molecular Biology of the Cell</source>
+              <year>2022</year>
+              <edition>7th</edition>
+              <publisher-name>Garland Science</publisher-name>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert ref.edition == "7th"
+
+    def test_comment_parsed(self):
+        """<comment> captured in Reference.comment."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Upcoming paper</article-title>
+              <year>2025</year>
+              <comment>In press</comment>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert ref.comment == "In press"
+
+    def test_edition_and_comment_together(self):
+        """Both edition and comment parsed from same reference."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation publication-type="book">
+              <source>Genetics</source>
+              <year>2024</year>
+              <edition>3rd</edition>
+              <comment>Epub ahead of print</comment>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert ref.edition == "3rd"
+        assert ref.comment == "Epub ahead of print"
+
+
+# -- Boxed text, floats-group, bio tests -----------------------------------
+
+
+class TestBoxedText:
+    def test_boxed_text_with_title(self):
+        """<boxed-text> with title renders title as bold + content."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Discussion</title>
+          <boxed-text>
+            <title>Box 1: Key Finding</title>
+            <p>Important discovery about gene regulation.</p>
+          </boxed-text>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        all_text_parts = [p.text for p in sec.paragraphs]
+        assert any("Key Finding" in t for t in all_text_parts)
+        assert any("Important discovery" in t for t in all_text_parts)
+
+    def test_boxed_text_with_label(self):
+        """<boxed-text> with label instead of title."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <boxed-text>
+            <label>Protocol 1</label>
+            <p>Steps for the experiment.</p>
+          </boxed-text>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        all_text_parts = [p.text for p in sec.paragraphs]
+        assert any("Protocol 1" in t for t in all_text_parts)
+        assert any("Steps for the experiment" in t for t in all_text_parts)
+
+    def test_boxed_text_no_title(self):
+        """<boxed-text> without title still extracts content."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <boxed-text>
+            <p>Stand-alone boxed content.</p>
+          </boxed-text>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        all_text_parts = [p.text for p in sec.paragraphs]
+        assert any("Stand-alone boxed content" in t for t in all_text_parts)
+
+
+class TestFloatsGroup:
+    def test_floats_group_figures(self):
+        """<floats-group> figures attached to document."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title><p>See Fig 1.</p></sec></body>
+        <floats-group>
+          <fig id="f1"><label>Figure 1</label>
+            <caption><p>Float fig caption.</p></caption></fig>
+          <fig id="f2"><label>Figure 2</label>
+            <caption><p>Second float fig.</p></caption></fig>
+        </floats-group></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.figures) == 2
+        assert doc.figures[0].label == "Figure 1"
+        assert doc.figures[1].label == "Figure 2"
+
+    def test_floats_group_tables(self):
+        """<floats-group> tables attached to document."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title><p>See Table 1.</p></sec></body>
+        <floats-group>
+          <table-wrap id="t1"><label>Table 1</label>
+            <table><thead><tr><th>A</th></tr></thead>
+            <tbody><tr><td>1</td></tr></tbody></table>
+          </table-wrap>
+        </floats-group></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.tables) == 1
+        assert doc.tables[0].label == "Table 1"
+
+
+class TestBioInBack:
+    def test_bio_in_back(self):
+        """<bio> in <back> captured as back_matter section."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back>
+          <bio>
+            <p>Dr. Smith is a professor at MIT.</p>
+            <p>Her research focuses on gene regulation.</p>
+          </bio>
+        </back></article>"""
+        doc = parse_jats(xml)
+        # Bio paragraphs captured in back_matter (section without heading)
+        assert len(doc.back_matter) >= 1
+        bio_paras = []
+        for sec in doc.back_matter:
+            bio_paras.extend(p.text for p in sec.paragraphs)
+        assert any("professor at MIT" in t for t in bio_paras)
+        assert any("gene regulation" in t for t in bio_paras)
