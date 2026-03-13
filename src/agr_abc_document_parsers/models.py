@@ -155,6 +155,10 @@ class Document:
     data_availability: str = ""
     author_notes: list[str] = field(default_factory=list)
     competing_interests: str = ""
+    received_date: str = ""   # ISO-ish: "2014-02-06" or "2014-02"
+    accepted_date: str = ""   # ISO-ish: "2014-02-06" or "2014-02"
+    copyright: str = ""       # copyright statement text
+    license_url: str = ""     # license URL (e.g., Creative Commons)
 
     # -- Loading methods ---------------------------------------------------
 

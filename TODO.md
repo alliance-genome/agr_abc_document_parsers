@@ -21,6 +21,40 @@ All original 5 failures and 3 additional edge cases fixed:
     preservation using real articles from Alliance prod DB/S3. 50/50 pass on first run.
 12. **PubMed NXML gap analysis** — Full analysis in `docs/nxml-parser-gap-analysis.md`
 
+13. **JATS parser improvements (from gap analysis):**
+    - `<monospace>` → `` `...` `` inline formatting
+    - `<strike>` → `~~...~~` strikethrough formatting
+    - `<underline>` → `<u>...</u>` formatting
+    - `<subtitle>` extraction in `_parse_title`
+    - `<collab>` group author handling at article level
+    - `<nlm-citation>` support (older PMC articles)
+    - `<fig-group>`, `<table-wrap-group>`, `<disp-formula-group>` container unpacking
+    - Fallback text extraction for unknown block elements in `_dispatch_sec_child`
+    - `<tfoot>` parsing in `_parse_table_wrap`
+    - `<uri>` extraction in references
+    - `<edition>` and `<comment>` fields in references
+    - 37 new tests for all improvements + `<boxed-text>`, `<floats-group>`, `<bio>`
+
+14. **JATS parser improvements (round 2):**
+    - `<sc>`, `<overline>`, `<roman>` pass-through inline formatting (text preserved, nested formatting works)
+    - `<graphic>` outside `<fig>` → standalone Figure (in `<sec>`, `<body>`, inside `<p>`)
+    - `<media>` elements → descriptive paragraph with label and caption
+    - Improved `<tex-math>` / MathML formula extraction (prefers LaTeX, handles `<alternatives>`, MathML `<annotation>`)
+    - `<data-title>` fallback for reference titles (dataset citations)
+    - 18 new tests for all improvements
+
+15. **JATS parser improvements (round 3):**
+    - `<named-content>` / `<styled-content>` recursive inline formatting (nested markup preserved)
+    - `<break/>` emits newline in inline text
+    - `<history>` dates: `received_date`, `accepted_date` fields on Document
+    - `<copyright-statement>` → `Document.copyright`
+    - `<license>` URL → `Document.license_url`
+    - `<date-in-citation>` in references → appended to `comment` field
+    - Refactored `_format_date` helper (shared by pub_date and history dates)
+    - Fixed `_parse_paragraph` and `_collect_from_p` to recurse via `_inline_text`
+      for unknown inline containers (was `all_text`, lost nested formatting)
+    - 15 new tests for all improvements
+
 ## Next Steps
 
 ### Run on a larger random sample (200+ articles)
@@ -28,22 +62,12 @@ All original 5 failures and 3 additional edge cases fixed:
 - A larger sample will surface rarer edge cases
 - Consider adding interesting failures to the fixed article set
 
-### JATS parser improvements (from NXML gap analysis)
+### Remaining JATS parser gaps (low priority)
 
-**Quick wins:**
-- Add `<monospace>` → `` `...` `` to `_INLINE_FMT` (1 line)
-- Add `<collab>` group author handling in `_parse_authors`
-- Add `<nlm-citation>` to `_find_citation()` for older articles
-- Add fallback text extraction for unknown block elements in `_dispatch_sec_child`
-- Add `<subtitle>` extraction in `_parse_title`
-- Add `<tfoot>` parsing in `_parse_table_wrap`
-- Add tests for `<boxed-text>`, `<floats-group>`, `<bio>`
-
-**Medium effort:**
-- Improve MathML / `<tex-math>` handling in formulas
-- Handle `<graphic>` outside `<fig>` (standalone images)
-- Handle `<fig-group>`, `<table-wrap-group>`, `<disp-formula-group>` containers
-- Add `<sc>`, `<underline>`, `<strike>` inline formatting
-- Extract missing reference sub-elements (comment, edition, uri, data-title)
+- `<self-uri>` — not extracted
+- `<trans-title-group>`, `<trans-abstract>` — translated content not extracted
+- `<kwd-group>` attributes (`kwd-group-type`, `xml:lang`) — not differentiated
+- Table attributes: `align`, `valign`, `scope`, `rowspan` correction
+- `<named-content>` `content-type` attribute not stored (useful for NLP)
 
 **Full details:** See `docs/nxml-parser-gap-analysis.md`

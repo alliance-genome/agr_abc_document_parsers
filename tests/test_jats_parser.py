@@ -2305,3 +2305,582 @@ class TestBioInBack:
             bio_paras.extend(p.text for p in sec.paragraphs)
         assert any("professor at MIT" in t for t in bio_paras)
         assert any("gene regulation" in t for t in bio_paras)
+
+
+# -- Small caps, overline, roman (pass-through inline formatting) ----------
+
+
+class TestPassThroughFormatting:
+    def test_sc_text_preserved(self):
+        """<sc> (small caps) text preserved in paragraph."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The <sc>Hox</sc> gene cluster is important.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "Hox" in para
+        assert "The Hox gene cluster is important." == para
+
+    def test_sc_with_nested_formatting(self):
+        """<sc> with nested <italic> preserves both."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The <sc>gene <italic>Drosophila</italic></sc> cluster.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "gene *Drosophila*" in para
+
+    def test_overline_text_preserved(self):
+        """<overline> text preserved in paragraph."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The value <overline>X</overline> is the complement.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "The value X is the complement." == para
+
+    def test_roman_text_preserved(self):
+        """<roman> text preserved in paragraph."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p><italic>This is italic with <roman>roman text</roman> inside.</italic></p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "roman text" in para
+
+
+# -- Standalone <graphic> outside <fig> ------------------------------------
+
+
+class TestStandaloneGraphic:
+    def test_graphic_in_section(self):
+        """Standalone <graphic> in <sec> becomes a Figure."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <p>See the image below.</p>
+          <graphic xmlns:xlink="http://www.w3.org/1999/xlink"
+                   xlink:href="image1.tif"/>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        assert len(sec.figures) == 1
+        assert sec.figures[0].graphic_url == "image1.tif"
+        assert sec.figures[0].label == ""
+
+    def test_graphic_with_alt_text(self):
+        """Standalone <graphic> with <alt-text> child."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <graphic xmlns:xlink="http://www.w3.org/1999/xlink"
+                   xlink:href="diagram.png">
+            <alt-text>Schematic of the pathway</alt-text>
+          </graphic>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        fig = doc.sections[0].figures[0]
+        assert fig.graphic_url == "diagram.png"
+        assert fig.alt_text == "Schematic of the pathway"
+
+    def test_graphic_at_body_level(self):
+        """Standalone <graphic> as direct child of <body>."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body>
+          <graphic xmlns:xlink="http://www.w3.org/1999/xlink"
+                   xlink:href="body-graphic.jpg"/>
+        </body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.sections) == 1
+        assert len(doc.sections[0].figures) == 1
+        assert doc.sections[0].figures[0].graphic_url == "body-graphic.jpg"
+
+    def test_graphic_inside_p(self):
+        """<graphic> inside <p> extracted and text split."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <p>Before image.
+            <graphic xmlns:xlink="http://www.w3.org/1999/xlink"
+                     xlink:href="inline.png"/>
+          After image.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        assert len(sec.figures) == 1
+        assert sec.figures[0].graphic_url == "inline.png"
+        assert len(sec.paragraphs) == 2
+        assert "Before image" in sec.paragraphs[0].text
+        assert "After image" in sec.paragraphs[1].text
+
+
+# -- <media> elements ------------------------------------------------------
+
+
+class TestMediaElements:
+    def test_media_in_section(self):
+        """<media> in <sec> rendered as descriptive paragraph."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Results</title>
+          <p>Normal paragraph.</p>
+          <media xmlns:xlink="http://www.w3.org/1999/xlink"
+                 xlink:href="video1.mp4" mimetype="video">
+            <label>Video 1</label>
+            <caption><p>Time-lapse of cell division.</p></caption>
+          </media>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        media_paras = [p for p in sec.paragraphs
+                       if "Video 1" in p.text]
+        assert len(media_paras) == 1
+        assert "cell division" in media_paras[0].text
+
+    def test_media_without_label(self):
+        """<media> without label still extracts caption."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <media xmlns:xlink="http://www.w3.org/1999/xlink"
+                 xlink:href="data.csv">
+            <caption><p>Supplementary dataset.</p></caption>
+          </media>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        sec = doc.sections[0]
+        media_paras = [p for p in sec.paragraphs
+                       if "dataset" in p.text.lower()]
+        assert len(media_paras) == 1
+
+    def test_media_at_body_level(self):
+        """<media> as direct child of <body>."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body>
+          <media xmlns:xlink="http://www.w3.org/1999/xlink"
+                 xlink:href="animation.gif">
+            <label>Animation 1</label>
+            <caption><p>Protein folding simulation.</p></caption>
+          </media>
+        </body></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.sections) == 1
+        media_paras = [p for p in doc.sections[0].paragraphs
+                       if "Animation 1" in p.text]
+        assert len(media_paras) == 1
+
+
+# -- Improved formula parsing (tex-math, alternatives, MathML) ------------
+
+
+class TestFormulaImproved:
+    def test_tex_math_preserved(self):
+        """<tex-math> content preserved as raw LaTeX."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula id="eq1">
+            <tex-math>E = mc^{2}</tex-math>
+          </disp-formula>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        formula = doc.sections[0].formulas[0]
+        assert "E = mc^{2}" in formula.text
+
+    def test_alternatives_prefers_tex_math(self):
+        """<alternatives> with tex-math and MathML uses tex-math."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula id="eq1">
+            <alternatives>
+              <tex-math>\\alpha + \\beta = \\gamma</tex-math>
+              <mml:math xmlns:mml="http://www.w3.org/1998/Math/MathML">
+                <mml:mi>&#945;</mml:mi><mml:mo>+</mml:mo>
+                <mml:mi>&#946;</mml:mi><mml:mo>=</mml:mo>
+                <mml:mi>&#947;</mml:mi>
+              </mml:math>
+            </alternatives>
+          </disp-formula>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        formula = doc.sections[0].formulas[0]
+        assert "\\alpha" in formula.text
+        assert "\\beta" in formula.text
+
+    def test_mathml_annotation_latex(self):
+        """MathML with LaTeX annotation extracts the annotation."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula>
+            <mml:math xmlns:mml="http://www.w3.org/1998/Math/MathML">
+              <mml:semantics>
+                <mml:mrow><mml:mi>x</mml:mi></mml:mrow>
+                <mml:annotation encoding="LaTeX">x^2 + y^2 = z^2</mml:annotation>
+              </mml:semantics>
+            </mml:math>
+          </disp-formula>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        formula = doc.sections[0].formulas[0]
+        assert "x^2 + y^2 = z^2" in formula.text
+
+    def test_plain_text_formula_unchanged(self):
+        """Plain text formula (no tex-math/MathML) still works."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula>F = ma</disp-formula>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "F = ma" in doc.sections[0].formulas[0].text
+
+    def test_formula_label_still_removed(self):
+        """Label removed from formula text even with new extraction."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>Methods</title>
+          <disp-formula>
+            <label>(1)</label>
+            <tex-math>a^2 + b^2 = c^2</tex-math>
+          </disp-formula>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        formula = doc.sections[0].formulas[0]
+        assert formula.label == "(1)"
+        assert "a^2 + b^2 = c^2" in formula.text
+        assert "(1)" not in formula.text
+
+
+# -- <data-title> fallback for references ---------------------------------
+
+
+class TestDataTitleRef:
+    def test_data_title_as_fallback(self):
+        """<data-title> used as title when no <article-title>."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation publication-type="data">
+              <person-group person-group-type="author">
+                <name><surname>Doe</surname><given-names>J</given-names></name>
+              </person-group>
+              <data-title>Genome-wide expression dataset</data-title>
+              <source>GEO</source>
+              <year>2024</year>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert ref.title == "Genome-wide expression dataset"
+
+    def test_article_title_preferred_over_data_title(self):
+        """<article-title> preferred when both present."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>The real title</article-title>
+              <data-title>Dataset title</data-title>
+              <year>2024</year>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        assert doc.references[0].title == "The real title"
+
+
+# -- Named-content / styled-content with nested formatting ----------------
+
+
+class TestNamedContentFormatting:
+    def test_named_content_preserves_italic(self):
+        """<named-content> with nested <italic> preserves formatting."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The species <named-content content-type="genus-species">
+            <italic>Drosophila melanogaster</italic>
+          </named-content> is a model organism.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "*Drosophila melanogaster*" in para
+        assert "model organism" in para
+
+    def test_styled_content_preserves_formatting(self):
+        """<styled-content> with nested formatting preserved."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>The <styled-content style="color:red">
+            <bold>important</bold> result
+          </styled-content> is notable.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "**important**" in para
+        assert "result" in para
+
+    def test_nested_named_content(self):
+        """Deeply nested inline containers preserve formatting."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>Gene <named-content content-type="gene">
+            <monospace>BRCA1</monospace>
+          </named-content> is mutated.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "`BRCA1`" in para
+
+
+# -- <break/> inline element ----------------------------------------------
+
+
+class TestBreakElement:
+    def test_break_in_paragraph(self):
+        """<break/> emits a newline in inline text."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <p>Line one<break/>Line two</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        # Paragraph whitespace normalization collapses \n to space
+        para = doc.sections[0].paragraphs[0].text
+        assert "Line one" in para
+        assert "Line two" in para
+
+    def test_break_in_inline_text(self):
+        """<break/> inside _inline_text (e.g., caption) preserved."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>R</title>
+          <fig id="f1"><label>Figure 1</label>
+            <caption><p>Panel A shows X.<break/>Panel B shows Y.</p></caption>
+          </fig>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        fig = doc.sections[0].figures[0]
+        # Caption uses _inline_text which should preserve break as \n
+        assert "Panel A" in fig.caption
+        assert "Panel B" in fig.caption
+
+
+# -- History dates (received/accepted) ------------------------------------
+
+
+class TestHistoryDates:
+    def test_received_and_accepted_dates(self):
+        """<history> dates parsed into Document fields."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <history>
+            <date date-type="received">
+              <day>15</day><month>3</month><year>2024</year>
+            </date>
+            <date date-type="accepted">
+              <day>20</day><month>6</month><year>2024</year>
+            </date>
+          </history>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.received_date == "2024-03-15"
+        assert doc.accepted_date == "2024-06-20"
+
+    def test_partial_dates(self):
+        """Dates with only year and month."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <history>
+            <date date-type="received">
+              <month>1</month><year>2025</year>
+            </date>
+          </history>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.received_date == "2025-01"
+
+    def test_no_history(self):
+        """No <history> leaves fields empty."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.received_date == ""
+        assert doc.accepted_date == ""
+
+    def test_accepted_alt_type(self):
+        """<date date-type='acc'> recognized as accepted."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <history>
+            <date date-type="acc">
+              <day>5</day><month>12</month><year>2023</year>
+            </date>
+          </history>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.accepted_date == "2023-12-05"
+
+
+# -- Copyright and license URL --------------------------------------------
+
+
+class TestCopyrightAndLicenseUrl:
+    def test_copyright_statement(self):
+        """<copyright-statement> captured in Document.copyright."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <permissions>
+            <copyright-statement>Copyright 2024 The Authors</copyright-statement>
+            <copyright-year>2024</copyright-year>
+          </permissions>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.copyright == "Copyright 2024 The Authors"
+
+    def test_license_url(self):
+        """License xlink:href captured as license_url."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <permissions>
+            <license xmlns:xlink="http://www.w3.org/1999/xlink"
+                     xlink:href="https://creativecommons.org/licenses/by/4.0/"
+                     license-type="open-access">
+              <license-p>This is an open access article.</license-p>
+            </license>
+          </permissions>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.license_url == "https://creativecommons.org/licenses/by/4.0/"
+        assert "open access" in doc.license
+
+    def test_no_permissions(self):
+        """No <permissions> leaves fields empty."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body></article>"""
+        doc = parse_jats(xml)
+        assert doc.copyright == ""
+        assert doc.license_url == ""
+
+
+# -- <date-in-citation> in references -------------------------------------
+
+
+class TestDateInCitation:
+    def test_access_date(self):
+        """<date-in-citation content-type='access-date'> added to comment."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Web resource</article-title>
+              <year>2024</year>
+              <date-in-citation content-type="access-date">
+                January 15, 2024
+              </date-in-citation>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert "Accessed" in ref.comment
+        assert "January 15, 2024" in ref.comment
+
+    def test_date_in_citation_with_existing_comment(self):
+        """Access date appended to existing comment."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Title</article-title>
+              <year>2024</year>
+              <comment>Online database</comment>
+              <date-in-citation content-type="access-date">
+                2024-03-01
+              </date-in-citation>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert "Online database" in ref.comment
+        assert "2024-03-01" in ref.comment
+        assert ";" in ref.comment
+
+    def test_date_in_citation_no_content_type(self):
+        """<date-in-citation> without content-type still captured."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>I</title><p>X.</p></sec></body>
+        <back><ref-list>
+          <ref id="r1">
+            <element-citation>
+              <article-title>Title</article-title>
+              <year>2024</year>
+              <date-in-citation>March 2024</date-in-citation>
+            </element-citation>
+          </ref>
+        </ref-list></back></article>"""
+        doc = parse_jats(xml)
+        ref = doc.references[0]
+        assert "March 2024" in ref.comment
+        # No "Accessed" prefix when content-type is not "access-date"
+        assert not ref.comment.startswith("Accessed")

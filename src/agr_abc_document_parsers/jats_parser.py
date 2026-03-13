@@ -125,6 +125,21 @@ def _parse_doi(root: etree._Element) -> str:
     return text(doi_elem)
 
 
+def _format_date(date_el: etree._Element) -> str:
+    """Format a JATS date element as ISO-ish string (YYYY-MM-DD)."""
+    year = text(date_el.find("year"))
+    if not year:
+        return ""
+    month = text(date_el.find("month"))
+    day = text(date_el.find("day"))
+    parts = [year]
+    if month:
+        parts.append(month.zfill(2))
+        if day:
+            parts.append(day.zfill(2))
+    return "-".join(parts)
+
+
 def _parse_article_meta(root: etree._Element, doc: Document) -> None:
     """Extract article-level metadata: PMID, PMC ID, journal, dates, etc."""
     meta = root.find(".//article-meta")
@@ -185,21 +200,38 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
             if pub_date is not None:
                 break
     if pub_date is not None:
-        year = text(pub_date.find("year"))
-        month = text(pub_date.find("month"))
-        day = text(pub_date.find("day"))
-        if year:
-            parts = [year]
-            if month:
-                parts.append(month.zfill(2))
-                if day:
-                    parts.append(day.zfill(2))
-            doc.pub_date = "-".join(parts)
+        doc.pub_date = _format_date(pub_date)
 
-    # License
+    # License text
     license_el = meta.find(".//permissions/license/license-p")
     if license_el is not None:
         doc.license = all_text(license_el)
+
+    # License URL
+    lic_elem = meta.find(".//permissions/license")
+    if lic_elem is not None:
+        lic_href = lic_elem.get(
+            "{http://www.w3.org/1999/xlink}href", ""
+        )
+        if not lic_href:
+            lic_href = lic_elem.get("href", "")
+        doc.license_url = lic_href
+
+    # Copyright statement
+    copyright_el = meta.find(".//permissions/copyright-statement")
+    if copyright_el is not None:
+        doc.copyright = all_text(copyright_el)
+
+    # History dates (received, accepted)
+    history = meta.find("history")
+    if history is not None:
+        for date_el in history.findall("date"):
+            date_type = date_el.get("date-type", "")
+            date_str = _format_date(date_el)
+            if date_type == "received" and date_str:
+                doc.received_date = date_str
+            elif date_type in ("accepted", "acc") and date_str:
+                doc.accepted_date = date_str
 
 
 def _parse_keywords(root: etree._Element) -> list[str]:
@@ -611,6 +643,10 @@ def _parse_body(root: etree._Element) -> list[Section]:
             preamble.formulas.append(_parse_formula(child))
         elif tag == "list":
             preamble.lists.append(_parse_list(child))
+        elif tag == "graphic":
+            preamble.figures.append(_parse_standalone_graphic(child))
+        elif tag == "media":
+            _parse_media_as_paragraph(child, preamble)
         elif tag in _SEC_BLOCK_TAGS:
             _dispatch_sec_block(child, tag, preamble)
         elif tag in _GROUP_CONTAINER_TAGS:
@@ -625,7 +661,9 @@ def _parse_body(root: etree._Element) -> list[Section]:
     return sections
 
 
-_BLOCK_TAGS = frozenset({"fig", "table-wrap", "disp-formula", "list"})
+_BLOCK_TAGS = frozenset({
+    "fig", "table-wrap", "disp-formula", "list", "graphic", "media",
+})
 
 
 def _dispatch_sec_block(
@@ -717,6 +755,10 @@ def _dispatch_sec_child(
         section.formulas.append(_parse_formula(child))
     elif tag == "list":
         section.lists.append(_parse_list(child))
+    elif tag == "graphic":
+        section.figures.append(_parse_standalone_graphic(child))
+    elif tag == "media":
+        _parse_media_as_paragraph(child, section)
     elif tag in _SEC_BLOCK_TAGS:
         _dispatch_sec_block(child, tag, section)
     elif tag in _GROUP_CONTAINER_TAGS:
@@ -806,7 +848,7 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
                 pre, suf = _INLINE_FMT[tag]
                 parts.append(f"{pre}{inner}{suf}")
         else:
-            parts.append(all_text(child))
+            parts.append(_inline_text(child))
 
     if p_elem.text:
         parts.append(p_elem.text)
@@ -826,6 +868,10 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
                 section.formulas.append(_parse_formula(child))
             elif tag == "list":
                 section.lists.append(_parse_list(child))
+            elif tag == "graphic":
+                section.figures.append(_parse_standalone_graphic(child))
+            elif tag == "media":
+                _parse_media_as_paragraph(child, section)
             if child.tail:
                 parts.append(child.tail)
         else:
@@ -844,11 +890,19 @@ _INLINE_FMT: dict[str, tuple[str, str]] = {
     "monospace": ("`", "`"),
     "strike": ("~~", "~~"),
     "underline": ("<u>", "</u>"),
+    "sc": ("", ""),        # small caps — no Markdown equivalent, preserve text
+    "overline": ("", ""),  # overline — no Markdown equivalent, preserve text
+    "roman": ("", ""),     # roman type in italic context — preserve text
 }
 
 
 def _inline_text(elem: etree._Element) -> str:
-    """Recursively format inline content, preserving nested markup."""
+    """Recursively format inline content, preserving nested markup.
+
+    Container-like inline elements (``<named-content>``, ``<styled-content>``,
+    ``<abbrev>``, etc.) are recursed into so that nested formatting is
+    preserved.  ``<break/>`` emits a newline.
+    """
     parts: list[str] = []
     if elem.text:
         parts.append(elem.text)
@@ -861,8 +915,12 @@ def _inline_text(elem: etree._Element) -> str:
             if inner:
                 pre, suf = _INLINE_FMT[tag]
                 parts.append(f"{pre}{inner}{suf}")
+        elif tag == "break":
+            parts.append("\n")
         else:
-            parts.append(all_text(child))
+            # Recurse into container-like inline elements (named-content,
+            # styled-content, abbrev, etc.) to preserve nested formatting.
+            parts.append(_inline_text(child))
         if child.tail:
             parts.append(child.tail)
     return "".join(parts)
@@ -921,7 +979,9 @@ def _parse_paragraph(
                 pre, suf = _INLINE_FMT[tag]
                 parts.append(f"{pre}{inner}{suf}")
         else:
-            parts.append(all_text(child))
+            # Recurse via _inline_text to preserve nested formatting
+            # inside container elements (named-content, styled-content, etc.)
+            parts.append(_inline_text(child))
 
         if child.tail:
             parts.append(child.tail)
@@ -975,6 +1035,71 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
         fig.graphic_url = href
 
     return fig
+
+
+def _parse_standalone_graphic(graphic_elem: etree._Element) -> Figure:
+    """Parse a standalone <graphic> outside <fig> into a Figure.
+
+    These appear as inline images, equation images, or decorative graphics
+    in some PMC articles.
+    """
+    fig = Figure()
+    href = graphic_elem.get(
+        "{http://www.w3.org/1999/xlink}href", ""
+    )
+    if not href:
+        href = graphic_elem.get("href", "")
+    fig.graphic_url = href
+
+    alt_elem = graphic_elem.find("alt-text")
+    if alt_elem is not None:
+        fig.alt_text = all_text(alt_elem).strip()
+
+    label_elem = graphic_elem.find("label")
+    if label_elem is not None:
+        fig.label = all_text(label_elem)
+
+    caption_elem = graphic_elem.find("caption")
+    if caption_elem is not None:
+        parts = []
+        for p in caption_elem.findall("p"):
+            parts.append(_inline_text(p).strip())
+        fig.caption = " ".join(p for p in parts if p)
+
+    return fig
+
+
+def _parse_media_as_paragraph(
+    media_elem: etree._Element, section: Section,
+) -> None:
+    """Parse a <media> element into a paragraph reference.
+
+    Media elements (video, audio, datasets) are rendered as a descriptive
+    paragraph with the media reference.
+    """
+    parts: list[str] = []
+
+    label_elem = media_elem.find("label")
+    if label_elem is not None:
+        label = all_text(label_elem).strip()
+        if label:
+            parts.append(f"**{label}**")
+
+    caption_elem = media_elem.find("caption")
+    if caption_elem is not None:
+        for p in caption_elem.findall("p"):
+            cap_text = _inline_text(p).strip()
+            if cap_text:
+                parts.append(cap_text)
+
+    if not parts:
+        # Fallback: extract any text content
+        fallback = all_text(media_elem).strip()
+        if fallback:
+            parts.append(fallback)
+
+    if parts:
+        section.paragraphs.append(Paragraph(text=" ".join(parts)))
 
 
 def _parse_table_wrap(tw_elem: etree._Element) -> Table:
@@ -1087,11 +1212,16 @@ def _parse_table_row(tr_elem: etree._Element, is_header: bool) -> list[TableCell
 
 
 def _parse_formula(formula_elem: etree._Element) -> Formula:
-    """Parse a <disp-formula> element."""
+    """Parse a <disp-formula> element.
+
+    Prefers ``<tex-math>`` content (raw LaTeX) over ``<mml:math>`` or plain
+    text from ``all_text()``.  When an ``<alternatives>`` wrapper is present,
+    selects the best available representation.
+    """
     label_elem = formula_elem.find("label")
     label = all_text(label_elem)
 
-    formula_text = all_text(formula_elem)
+    formula_text = _extract_formula_text(formula_elem)
     # Remove label from text — may appear at start or end
     if label:
         if formula_text.endswith(label):
@@ -1100,6 +1230,50 @@ def _parse_formula(formula_elem: etree._Element) -> Formula:
             formula_text = formula_text[len(label):].strip()
 
     return Formula(text=formula_text, label=label)
+
+
+def _extract_formula_text(elem: etree._Element) -> str:
+    """Extract the best text representation from a formula element.
+
+    Priority order:
+    1. ``<tex-math>`` — raw LaTeX, most readable for downstream use
+    2. ``<mml:math>`` — extract text nodes from MathML
+    3. ``all_text()`` — fallback for plain text formulas
+
+    Handles ``<alternatives>`` containers that wrap multiple representations.
+    """
+    # Check for <alternatives> wrapper
+    alt = elem.find("alternatives")
+    search_in = alt if alt is not None else elem
+
+    # 1. Try tex-math (raw LaTeX string)
+    tex = search_in.find("tex-math")
+    if tex is not None:
+        tex_content = text(tex).strip()
+        if tex_content:
+            return tex_content
+
+    # 2. Try MathML — extract text from annotation or mi/mn/mo elements
+    for ns_prefix in ("", "{http://www.w3.org/1998/Math/MathML}"):
+        mml = search_in.find(f"{ns_prefix}math")
+        if mml is not None:
+            # Prefer annotation with encoding="LaTeX" or "TeX"
+            for ann in mml.iter(
+                f"{ns_prefix}annotation",
+                "{http://www.w3.org/1998/Math/MathML}annotation",
+            ):
+                encoding = (ann.get("encoding") or "").lower()
+                if "tex" in encoding or "latex" in encoding:
+                    ann_text = text(ann).strip()
+                    if ann_text:
+                        return ann_text
+            # Fall back to all_text on the math element
+            math_text = all_text(mml).strip()
+            if math_text:
+                return math_text
+
+    # 3. Fallback
+    return all_text(elem)
 
 
 def _parse_list(list_elem: etree._Element) -> ListBlock:
@@ -1617,7 +1791,10 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
     _parse_ref_authors(citation, ref)
 
     # Title
+    # Title — prefer article-title, fall back to data-title (datasets)
     title_elem = citation.find("article-title")
+    if title_elem is None:
+        title_elem = citation.find("data-title")
     if title_elem is not None:
         ref.title = all_text(title_elem)
 
@@ -1662,6 +1839,20 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
     comment_elem = citation.find("comment")
     if comment_elem is not None:
         ref.comment = all_text(comment_elem)
+
+    # Date-in-citation (access date for URLs)
+    date_cit = citation.find("date-in-citation")
+    if date_cit is not None:
+        access_date = all_text(date_cit).strip()
+        if access_date:
+            # Append to comment (e.g., "Accessed 2024-01-15")
+            content_type = date_cit.get("content-type", "")
+            prefix = "Accessed " if content_type == "access-date" else ""
+            date_note = f"{prefix}{access_date}"
+            if ref.comment:
+                ref.comment = f"{ref.comment}; {date_note}"
+            else:
+                ref.comment = date_note
 
     # Editors
     _parse_ref_editors(citation, ref)
