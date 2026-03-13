@@ -32,9 +32,17 @@ class InlineRef:
 
 
 @dataclass
+class NamedContent:
+    """An annotated text span from <named-content> or <styled-content>."""
+    text: str = ""
+    content_type: str = ""
+
+
+@dataclass
 class Paragraph:
     text: str = ""
     refs: list[InlineRef] = field(default_factory=list)
+    named_content: list[NamedContent] = field(default_factory=list)
 
 
 @dataclass
@@ -50,6 +58,7 @@ class Figure:
 class TableCell:
     text: str = ""
     is_header: bool = False
+    align: str = ""  # "left", "center", "right", "justify", "char"
 
 
 @dataclass
@@ -160,6 +169,8 @@ class Document:
     copyright: str = ""       # copyright statement text
     license_url: str = ""     # license URL (e.g., Creative Commons)
     self_uri: str = ""        # article self-URI (e.g., PDF link)
+    trans_titles: list[str] = field(default_factory=list)  # translated titles
+    counts: dict[str, int] = field(default_factory=dict)   # page-count, fig-count, etc.
 
     # -- Loading methods ---------------------------------------------------
 

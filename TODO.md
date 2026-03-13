@@ -63,6 +63,22 @@ All original 5 failures and 3 additional edge cases fixed:
     - Refactored `_parse_table_row` to return rowspan info + new `_expand_rowspans`
     - 13 new tests for all improvements
 
+17. **JATS parser improvements (round 5 — final metadata and inline gaps):**
+    - `<trans-title-group>` → `Document.trans_titles` with language tags, subtitle support
+    - `<counts>` → `Document.counts` dict (fig-count, page-count, ref-count, etc.)
+    - `<uri>` rendered as Markdown link `[text](href)` in paragraphs (both paths)
+    - `<email>` explicitly handled in paragraph parsing (text preserved)
+    - Translated titles emitted as italic lines in Markdown output
+    - 17 new tests for all improvements
+
+18. **JATS parser improvements (round 6 — cosmetic gaps):**
+    - `<named-content>` / `<styled-content>` `content-type` → `Paragraph.named_content` annotations
+    - New `NamedContent` dataclass for annotated text spans (text + content_type)
+    - Table cell `align` attribute → `TableCell.align` field
+    - Colspan padding cells inherit source cell alignment
+    - GFM column alignment in Markdown emitter (`:---:`, `---:` separators)
+    - 10 new tests for all improvements
+
 ## Next Steps
 
 ### Run on a larger random sample (200+ articles)
@@ -70,11 +86,7 @@ All original 5 failures and 3 additional edge cases fixed:
 - A larger sample will surface rarer edge cases
 - Consider adding interesting failures to the fixed article set
 
-### Remaining minor gaps (no content loss)
-
-- `<named-content>` `content-type` attribute not stored (useful for downstream NLP)
-- Table cell `align`/`valign`/`scope` attributes not preserved
-- `<trans-title-group>` translated titles not extracted
-- `<counts>` (page-count, fig-count, etc.) not extracted
+### All gap analysis items addressed
+All elements from `docs/nxml-parser-gap-analysis.md` have been implemented.
 
 **Full details:** See `docs/nxml-parser-gap-analysis.md`

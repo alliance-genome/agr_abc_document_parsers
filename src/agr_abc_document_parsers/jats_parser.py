@@ -14,6 +14,7 @@ from agr_abc_document_parsers.models import (
     FundingEntry,
     InlineRef,
     ListBlock,
+    NamedContent,
     Paragraph,
     Reference,
     SecondaryAbstract,
@@ -51,6 +52,7 @@ def parse_jats(
     doc = Document(source_format="jats")
 
     doc.title = _parse_title(root)
+    doc.trans_titles = _parse_trans_titles(root)
     doc.doi = _parse_doi(root)
     doc.keywords = _parse_keywords(root)
 
@@ -117,6 +119,30 @@ def _parse_title(root: etree._Element) -> str:
         if subtitle:
             title = f"{title}: {subtitle}"
     return title
+
+
+def _parse_trans_titles(root: etree._Element) -> list[str]:
+    """Extract translated titles from title-group/trans-title-group."""
+    titles: list[str] = []
+    title_group = root.find(".//article-meta/title-group")
+    if title_group is None:
+        return titles
+    for ttg in title_group.findall("trans-title-group"):
+        lang = ttg.get("{http://www.w3.org/XML/1998/namespace}lang", "")
+        title_elem = ttg.find("trans-title")
+        if title_elem is None:
+            continue
+        title = _inline_text(title_elem).strip()
+        subtitle_elem = ttg.find("trans-subtitle")
+        if subtitle_elem is not None:
+            subtitle = _inline_text(subtitle_elem).strip()
+            if subtitle:
+                title = f"{title}: {subtitle}"
+        if title:
+            if lang:
+                title = f"{title} [{lang}]"
+            titles.append(title)
+    return titles
 
 
 def _parse_doi(root: etree._Element) -> str:
@@ -244,6 +270,20 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
         if not href:
             href = text(self_uri_el)
         doc.self_uri = href
+
+    # Counts (page-count, fig-count, table-count, etc.)
+    counts_el = meta.find("counts")
+    if counts_el is not None:
+        for child in counts_el:
+            tag = etree.QName(child.tag).localname if isinstance(
+                child.tag, str
+            ) else ""
+            count_val = child.get("count", "")
+            if tag and count_val:
+                try:
+                    doc.counts[tag] = int(count_val)
+                except (ValueError, OverflowError):
+                    pass
 
 
 def _parse_keywords(root: etree._Element) -> list[str]:
@@ -857,13 +897,18 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
     # Accumulate text+refs into segments, flushing at each block boundary.
     parts: list[str] = []
     refs: list[InlineRef] = []
+    annotations: list[NamedContent] = []
 
     def _flush() -> None:
         text = re.sub(r"\s+", " ", "".join(parts)).strip()
         if text:
-            section.paragraphs.append(Paragraph(text=text, refs=list(refs)))
+            section.paragraphs.append(Paragraph(
+                text=text, refs=list(refs),
+                named_content=list(annotations),
+            ))
         parts.clear()
         refs.clear()
+        annotations.clear()
 
     def _collect_inline(child: etree._Element) -> None:
         tag = etree.QName(child.tag).localname if isinstance(
@@ -875,7 +920,7 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
                 parts.append(ref_text)
-        elif tag == "ext-link":
+        elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
             href = child.get(
                 "{http://www.w3.org/1999/xlink}href", ""
@@ -888,13 +933,22 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
                 parts.append(href)
             elif link_text:
                 parts.append(link_text)
+        elif tag == "email":
+            parts.append(all_text(child))
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
                 pre, suf = _INLINE_FMT[tag]
                 parts.append(f"{pre}{inner}{suf}")
         else:
-            parts.append(_inline_text(child))
+            inner = _inline_text(child)
+            parts.append(inner)
+            if tag in ("named-content", "styled-content") and inner:
+                ctype = child.get("content-type", "")
+                if ctype:
+                    annotations.append(
+                        NamedContent(text=inner, content_type=ctype)
+                    )
 
     if p_elem.text:
         parts.append(p_elem.text)
@@ -985,6 +1039,7 @@ def _parse_paragraph(
     """
     parts: list[str] = []
     refs: list[InlineRef] = []
+    annotations: list[NamedContent] = []
 
     if p_elem.text:
         parts.append(p_elem.text)
@@ -1006,7 +1061,7 @@ def _parse_paragraph(
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
                 parts.append(ref_text)
-        elif tag == "ext-link":
+        elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
             href = child.get(
                 "{http://www.w3.org/1999/xlink}href", ""
@@ -1019,6 +1074,8 @@ def _parse_paragraph(
                 parts.append(href)
             elif link_text:
                 parts.append(link_text)
+        elif tag == "email":
+            parts.append(all_text(child))
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
@@ -1027,7 +1084,15 @@ def _parse_paragraph(
         else:
             # Recurse via _inline_text to preserve nested formatting
             # inside container elements (named-content, styled-content, etc.)
-            parts.append(_inline_text(child))
+            inner = _inline_text(child)
+            parts.append(inner)
+            # Collect content-type annotations from named-content/styled-content
+            if tag in ("named-content", "styled-content") and inner:
+                ctype = child.get("content-type", "")
+                if ctype:
+                    annotations.append(
+                        NamedContent(text=inner, content_type=ctype)
+                    )
 
         if child.tail:
             parts.append(child.tail)
@@ -1035,7 +1100,7 @@ def _parse_paragraph(
     # Collapse XML-indentation whitespace (newlines + spaces) into
     # single spaces so parsed paragraphs read cleanly.
     para_text = re.sub(r"\s+", " ", "".join(parts)).strip()
-    return Paragraph(text=para_text, refs=refs)
+    return Paragraph(text=para_text, refs=refs, named_content=annotations)
 
 
 def _parse_fig(fig_elem: etree._Element) -> Figure:
@@ -1249,9 +1314,11 @@ def _parse_table_row(
                 colspan = min(int(child.get("colspan", "1") or "1"), 50)
             except (ValueError, OverflowError):
                 colspan = 1
+            cell_align = child.get("align", "")
             cell = TableCell(
                 text=all_text(child),
                 is_header=(tag == "th" or is_header),
+                align=cell_align,
             )
             cells.append(cell)
             rowspans.append(rowspan)
@@ -1259,6 +1326,7 @@ def _parse_table_row(
                 cells.append(TableCell(
                     text="",
                     is_header=(tag == "th" or is_header),
+                    align=cell_align,
                 ))
                 rowspans.append(rowspan)
     return cells, rowspans

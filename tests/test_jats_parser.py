@@ -3141,3 +3141,428 @@ class TestRowspanExpansion:
         assert len(table.rows) == 2
         assert table.rows[0][0].text == "A"
         assert table.rows[1][0].text == "1"
+
+
+# ── Trans-title-group ────────────────────────────────────────────────
+
+class TestTransTitleGroup:
+    """Tests for <trans-title-group> translated title extraction."""
+
+    def test_single_trans_title(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Original Title</article-title>
+            <trans-title-group xml:lang="es">
+              <trans-title>Titulo Original</trans-title>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.title == "Original Title"
+        assert len(doc.trans_titles) == 1
+        assert doc.trans_titles[0] == "Titulo Original [es]"
+
+    def test_multiple_trans_titles(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>English Title</article-title>
+            <trans-title-group xml:lang="fr">
+              <trans-title>Titre Francais</trans-title>
+            </trans-title-group>
+            <trans-title-group xml:lang="de">
+              <trans-title>Deutscher Titel</trans-title>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.trans_titles) == 2
+        assert doc.trans_titles[0] == "Titre Francais [fr]"
+        assert doc.trans_titles[1] == "Deutscher Titel [de]"
+
+    def test_trans_title_with_subtitle(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Main</article-title>
+            <trans-title-group xml:lang="pt">
+              <trans-title>Titulo</trans-title>
+              <trans-subtitle>Um subtitulo</trans-subtitle>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.trans_titles[0] == "Titulo: Um subtitulo [pt]"
+
+    def test_trans_title_no_lang(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Main</article-title>
+            <trans-title-group>
+              <trans-title>Translated</trans-title>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.trans_titles[0] == "Translated"
+
+    def test_trans_title_with_formatting(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Main</article-title>
+            <trans-title-group xml:lang="es">
+              <trans-title>Efecto de <italic>Arabidopsis</italic></trans-title>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.trans_titles[0] == "Efecto de *Arabidopsis* [es]"
+
+    def test_no_trans_titles(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>No Translations</article-title>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.trans_titles == []
+
+    def test_trans_title_emitted_in_markdown(self):
+        xml = b"""<article><front><article-meta>
+          <title-group>
+            <article-title>Main Title</article-title>
+            <trans-title-group xml:lang="es">
+              <trans-title>Titulo Principal</trans-title>
+            </trans-title-group>
+          </title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        md = emit_markdown(doc)
+        assert "# Main Title" in md
+        assert "*Titulo Principal [es]*" in md
+
+
+# ── Counts metadata ──────────────────────────────────────────────────
+
+class TestCountsMetadata:
+    """Tests for <counts> metadata extraction."""
+
+    def test_standard_counts(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <counts>
+            <fig-count count="5"/>
+            <table-count count="3"/>
+            <page-count count="12"/>
+            <ref-count count="42"/>
+          </counts>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.counts == {
+            "fig-count": 5,
+            "table-count": 3,
+            "page-count": 12,
+            "ref-count": 42,
+        }
+
+    def test_equation_and_word_counts(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <counts>
+            <equation-count count="8"/>
+            <word-count count="5000"/>
+          </counts>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.counts["equation-count"] == 8
+        assert doc.counts["word-count"] == 5000
+
+    def test_no_counts(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert doc.counts == {}
+
+    def test_invalid_count_value_skipped(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <counts>
+            <fig-count count="abc"/>
+            <page-count count="10"/>
+          </counts>
+        </article-meta></front></article>"""
+        doc = parse_jats(xml)
+        assert "fig-count" not in doc.counts
+        assert doc.counts["page-count"] == 10
+
+
+# ── Email and URI inline rendering ───────────────────────────────────
+
+class TestEmailInline:
+    """Tests for <email> element handling in paragraphs."""
+
+    def test_email_in_paragraph(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Contact: <email>john@example.com</email> for details.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "john@example.com" in doc.sections[0].paragraphs[0].text
+
+    def test_email_in_split_paragraph(self):
+        """Email inside a <p> that also contains a block element."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Write to <email>info@lab.org</email>.
+          <fig><label>Fig 1</label></fig>
+          More text.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "info@lab.org" in doc.sections[0].paragraphs[0].text
+
+
+class TestUriInline:
+    """Tests for <uri> element handling in paragraphs."""
+
+    def test_uri_with_href(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>See <uri xlink:href="http://example.com/data"
+               xmlns:xlink="http://www.w3.org/1999/xlink"
+               >Dataset 1</uri> for raw data.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "[Dataset 1](http://example.com/data)" in para
+
+    def test_uri_text_matches_href(self):
+        """When text equals href, just emit the URL (no markdown link)."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Visit <uri xlink:href="http://example.com"
+               xmlns:xlink="http://www.w3.org/1999/xlink"
+               >http://example.com</uri>.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0].text
+        assert "http://example.com" in para
+        # Should NOT have redundant [url](url) format
+        assert "[http://example.com]" not in para
+
+    def test_uri_no_href_uses_text(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>See <uri>http://data.org/set1</uri>.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "http://data.org/set1" in doc.sections[0].paragraphs[0].text
+
+    def test_uri_in_split_paragraph(self):
+        """URI inside a <p> with block elements uses _collect_from_p path."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Data at <uri xlink:href="http://example.com/data"
+               xmlns:xlink="http://www.w3.org/1999/xlink"
+               >Dataset</uri>.
+          <fig><label>Fig 1</label></fig></p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "[Dataset](http://example.com/data)" in \
+            doc.sections[0].paragraphs[0].text
+
+
+# ── Named-content content-type annotation ────────────────────────────
+
+class TestNamedContentAnnotation:
+    """Tests for <named-content> content-type attribute extraction."""
+
+    def test_gene_annotation(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>The <named-content content-type="gene">BRCA1</named-content>
+          gene is important.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert "BRCA1" in para.text
+        assert len(para.named_content) == 1
+        assert para.named_content[0].text == "BRCA1"
+        assert para.named_content[0].content_type == "gene"
+
+    def test_multiple_annotations(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p><named-content content-type="genus-species">E. coli</named-content>
+          expresses <named-content content-type="gene">lacZ</named-content>.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert len(para.named_content) == 2
+        types = {nc.content_type for nc in para.named_content}
+        assert types == {"genus-species", "gene"}
+
+    def test_styled_content_annotation(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Use <styled-content content-type="monospace">grep</styled-content>
+          to search.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert "grep" in para.text
+        assert len(para.named_content) == 1
+        assert para.named_content[0].content_type == "monospace"
+
+    def test_no_content_type_no_annotation(self):
+        """named-content without content-type attribute produces no annotation."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>The <named-content>something</named-content> here.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert "something" in para.text
+        assert para.named_content == []
+
+    def test_annotation_with_nested_formatting(self):
+        """named-content with nested italic preserves formatting in text."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>The <named-content content-type="genus-species"
+            ><italic>Drosophila melanogaster</italic></named-content> fly.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert "*Drosophila melanogaster*" in para.text
+        assert para.named_content[0].text == "*Drosophila melanogaster*"
+        assert para.named_content[0].content_type == "genus-species"
+
+    def test_annotation_in_split_paragraph(self):
+        """named-content in a paragraph with block elements (_collect_from_p)."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>Gene <named-content content-type="gene">TP53</named-content> is
+          <fig><label>Fig 1</label></fig>
+          shown above.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        para = doc.sections[0].paragraphs[0]
+        assert "TP53" in para.text
+        assert len(para.named_content) == 1
+        assert para.named_content[0].content_type == "gene"
+
+
+# ── Table cell alignment ─────────────────────────────────────────────
+
+class TestTableCellAlignment:
+    """Tests for table cell align attribute extraction and markdown emission."""
+
+    def test_align_attribute_extracted(self):
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <table-wrap><table>
+            <thead><tr>
+              <th align="left">Name</th>
+              <th align="center">Score</th>
+              <th align="right">Rank</th>
+            </tr></thead>
+            <tbody><tr>
+              <td align="left">A</td>
+              <td align="center">95</td>
+              <td align="right">1</td>
+            </tr></tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        assert table.rows[0][0].align == "left"
+        assert table.rows[0][1].align == "center"
+        assert table.rows[0][2].align == "right"
+        assert table.rows[1][0].align == "left"
+
+    def test_align_in_markdown_separator(self):
+        """Emitter uses header cell align for GFM column alignment."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <table-wrap><table>
+            <thead><tr>
+              <th align="left">A</th>
+              <th align="center">B</th>
+              <th align="right">C</th>
+            </tr></thead>
+            <tbody><tr>
+              <td>1</td><td>2</td><td>3</td>
+            </tr></tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        md = emit_markdown(doc)
+        assert "|---|:---:|---:|" in md
+
+    def test_no_align_default_separator(self):
+        """Without align attributes, separator uses plain ---."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <table-wrap><table>
+            <thead><tr><th>A</th><th>B</th></tr></thead>
+            <tbody><tr><td>1</td><td>2</td></tr></tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        md = emit_markdown(doc)
+        assert "|---|---|" in md
+
+    def test_colspan_inherits_align(self):
+        """Colspan padding cells inherit the source cell's alignment."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <table-wrap><table>
+            <thead><tr>
+              <th align="center" colspan="2">Wide</th>
+              <th>C</th>
+            </tr></thead>
+            <tbody><tr>
+              <td>1</td><td>2</td><td>3</td>
+            </tr></tbody>
+          </table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        # Both the cell and its colspan padding should have align="center"
+        assert table.rows[0][0].align == "center"
+        assert table.rows[0][1].align == "center"
+        assert table.rows[0][2].align == ""

@@ -54,6 +54,9 @@ def _emit_title(doc: Document, lines: list[str]) -> None:
         return
     lines.append(f"# {doc.title}")
     lines.append("")
+    for tt in doc.trans_titles:
+        lines.append(f"*{tt}*")
+        lines.append("")
 
 
 def _emit_metadata(doc: Document, lines: list[str]) -> None:
@@ -229,8 +232,20 @@ def _emit_table(table: Table, lines: list[str]) -> None:
             cells.append("")
         lines.append("| " + " | ".join(cells) + " |")
 
-    # Separator after headers
-    lines.append("|" + "|".join(["---"] * col_count) + "|")
+    # Separator after headers — use alignment from last header row
+    separators: list[str] = []
+    last_header = header_rows[-1] if header_rows else []
+    for col_idx in range(col_count):
+        align = ""
+        if col_idx < len(last_header):
+            align = last_header[col_idx].align
+        if align == "center":
+            separators.append(":---:")
+        elif align == "right":
+            separators.append("---:")
+        else:
+            separators.append("---")
+    lines.append("|" + "|".join(separators) + "|")
 
     # Data rows
     for row in data_rows:
