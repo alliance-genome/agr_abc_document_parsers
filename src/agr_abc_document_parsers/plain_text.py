@@ -195,6 +195,8 @@ def _collect_figure_text(fig: Figure, parts: list[str]) -> None:
         text_parts.append(strip_markdown_formatting(fig.caption))
     if text_parts:
         parts.append(" ".join(text_parts))
+    for cp in fig.caption_paragraphs:
+        parts.append(strip_markdown_formatting(cp))
     if fig.alt_text:
         parts.append(strip_markdown_formatting(fig.alt_text))
     if fig.attrib:

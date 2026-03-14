@@ -1181,13 +1181,21 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
     caption_elem = fig_elem.find("caption")
     if caption_elem is not None:
         # Caption may have <title> and/or <p>
-        parts = []
         title = caption_elem.find("title")
         if title is not None:
-            parts.append(_inline_text(title).strip())
-        for p in caption_elem.findall("p"):
-            parts.append(_inline_text(p).strip())
-        fig.caption = " ".join(p for p in parts if p)
+            fig.caption = _inline_text(title).strip()
+        p_parts = [
+            _inline_text(p).strip()
+            for p in caption_elem.findall("p")
+            if _inline_text(p).strip()
+        ]
+        if fig.caption and p_parts:
+            # Title goes in caption, body <p>s in caption_paragraphs
+            fig.caption_paragraphs = p_parts
+        elif p_parts and not fig.caption:
+            # No title: first <p> is the caption, rest are body
+            fig.caption = p_parts[0]
+            fig.caption_paragraphs = p_parts[1:]
 
     # Alt-text: may appear as direct child of <fig> or inside <graphic>
     alt_elem = fig_elem.find("alt-text")
@@ -1906,10 +1914,21 @@ def _parse_back_sections(
             title_elem = child.find("title")
             if title_elem is not None:
                 section.heading = all_text(title_elem)
+            con_section = None
             for fn in child.findall("fn"):
-                # Skip COI footnotes already captured in doc.competing_interests
                 fn_type = fn.get("fn-type", "")
+                # Skip COI footnotes already captured in doc.competing_interests
                 if fn_type in _COI_FN_TYPES:
+                    continue
+                # Author contributions get their own headed section to
+                # survive markdown roundtrip without being absorbed by
+                # adjacent sections (e.g. Funding).
+                if fn_type == "con":
+                    if con_section is None:
+                        con_section = Section(
+                            level=1, heading="Author Contributions",
+                        )
+                    _extract_fn_paragraphs(fn, con_section)
                     continue
                 # Back-matter fn-group notes are standalone statements
                 # (not inline footnotes), so store as paragraphs for
@@ -1917,6 +1936,8 @@ def _parse_back_sections(
                 _extract_fn_paragraphs(fn, section)
             if section.paragraphs or section.heading:
                 sections.append(section)
+            if con_section and con_section.paragraphs:
+                sections.append(con_section)
         elif tag == "notes":
             section = Section(level=1)
             title_elem = child.find("title")
@@ -2027,7 +2048,24 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             doc.tables.append(_parse_table_wrap(child))
         elif tag == "boxed-text":
             section = Section(level=1)
+            # Use boxed-text title/caption as section heading so
+            # it survives markdown roundtrip as a headed section.
+            for t_tag in ("title", "label", "caption/title"):
+                t_elem = child.find(t_tag)
+                if t_elem is not None:
+                    t_text = all_text(t_elem).strip()
+                    if t_text:
+                        section.heading = t_text
+                        break
             _parse_boxed_text(child, section)
+            # Remove duplicate bold title paragraph added by
+            # _parse_boxed_text since we already used it as heading.
+            if section.heading and section.paragraphs:
+                bold_title = f"**{section.heading}**"
+                section.paragraphs = [
+                    p for p in section.paragraphs
+                    if p.text != bold_title
+                ]
             if (section.paragraphs or section.subsections
                     or section.lists):
                 doc.back_matter.append(section)

@@ -48,7 +48,8 @@ class Paragraph:
 @dataclass
 class Figure:
     label: str = ""       # "Figure 1" or "Fig. 1"
-    caption: str = ""     # figDesc text
+    caption: str = ""     # caption title (from <title> inside <caption>)
+    caption_paragraphs: list[str] = field(default_factory=list)  # body <p>s
     alt_text: str = ""    # alternative text from <alt-text> / <graphic>
     attrib: str = ""      # attribution / source text from <attrib>
     graphic_url: str = ""  # image ref (preserved for downstream; not in Markdown)

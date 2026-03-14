@@ -622,7 +622,7 @@ _AUTHOR_BIO_PATTERN = re.compile(
 # Abbreviation definition lines: "ABBREV full expansion" (no punctuation at end)
 # These come from abbreviation/glossary sections that BioC also excludes.
 _ABBREV_DEF_PATTERN = re.compile(
-    r"^[A-Za-z0-9α-ωΑ-Ω/+-]+\s+[A-Z][a-z]",
+    r"^[A-Za-z0-9α-ωΑ-Ω/+-]+\s+[A-Za-z]",
 )
 
 # Back-matter heading variations that map to our structured fields
@@ -676,7 +676,7 @@ def _classify_pmc_paragraph(para: str) -> str:
             return "metadata"
         # Check for abbreviation definitions (short "ABBREV Expansion" lines)
         # that BioC also excludes from its ABBR section
-        if _ABBREV_DEF_PATTERN.match(stripped) and len(stripped) < 60:
+        if _ABBREV_DEF_PATTERN.match(stripped) and len(stripped) < 150:
             return "metadata"
         return "section_heading"
 
@@ -878,24 +878,35 @@ def pytest_generate_tests(metafunc):
         return
 
     fixed = _load_fixed_articles()
+    cached_only = metafunc.config.getoption("--cached-only", default=False)
     count = metafunc.config.getoption("--count", default=500)
     api_key_opt = metafunc.config.getoption("--ncbi-api-key", default=None)
     api_key = api_key_opt or os.environ.get("NCBI_API_KEY")
 
-    random_ids: list[str] = []
-    if count > 0:
-        try:
-            random_ids = _fetch_random_pmcids(count, api_key)
-        except Exception:
-            pass
+    if cached_only:
+        # Load all cached PMCIDs that have both XML and reference text
+        seen = set(fixed)
+        all_ids = list(fixed)
+        if _CACHE_DIR.exists():
+            for d in sorted(_CACHE_DIR.iterdir()):
+                if d.is_dir() and d.name.isdigit() and d.name not in seen:
+                    seen.add(d.name)
+                    all_ids.append(d.name)
+    else:
+        random_ids: list[str] = []
+        if count > 0:
+            try:
+                random_ids = _fetch_random_pmcids(count, api_key)
+            except Exception:
+                pass
 
-    # Deduplicate, fixed first
-    seen = set(fixed)
-    all_ids = list(fixed)
-    for pid in random_ids:
-        if pid not in seen:
-            seen.add(pid)
-            all_ids.append(pid)
+        # Deduplicate, fixed first
+        seen = set(fixed)
+        all_ids = list(fixed)
+        for pid in random_ids:
+            if pid not in seen:
+                seen.add(pid)
+                all_ids.append(pid)
 
     # Filter out cached articles that lack reference text (untestable).
     # New articles fetched for the first time are kept — they may succeed.

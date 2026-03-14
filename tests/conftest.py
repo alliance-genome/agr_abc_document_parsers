@@ -16,6 +16,10 @@ def pytest_addoption(parser):
         help="Force re-download of cached PMC data",
     )
     parser.addoption(
+        "--cached-only", action="store_true", default=False,
+        help="Test only cached PMC articles (no network fetch for new IDs)",
+    )
+    parser.addoption(
         "--tei-count", type=int, default=20,
         help="Number of TEI files to test from prod DB (teitest only)",
     )

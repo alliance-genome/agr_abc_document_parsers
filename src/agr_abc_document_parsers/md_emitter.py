@@ -293,9 +293,12 @@ def _emit_figure(fig: Figure, lines: list[str]) -> None:
     elif fig.caption:
         lines.append(fig.caption)
     else:
-        if not fig.alt_text and not fig.attrib:
+        if not fig.alt_text and not fig.attrib and not fig.caption_paragraphs:
             return
     lines.append("")
+    for cp in fig.caption_paragraphs:
+        lines.append(cp)
+        lines.append("")
     if fig.alt_text:
         lines.append(fig.alt_text)
         lines.append("")
@@ -402,8 +405,17 @@ def _emit_back_matter(
         for note in section.notes:
             footnote_counter[0] += 1
             lines.append(f"[^{footnote_counter[0]}]: {note}")
-        if section.paragraphs or section.notes:
+        for lst in section.lists:
+            for item in lst.items:
+                footnote_counter[0] += 1
+                lines.append(f"[^{footnote_counter[0]}]: {item}")
+        if section.paragraphs or section.notes or section.lists:
             lines.append("")
+        # Emit headed subsections (e.g. appendix sections)
+        headed_subs = [s for s in section.subsections if s.heading]
+        if headed_subs:
+            _emit_sections(headed_subs, lines, base_level=2,
+                           footnote_counter=footnote_counter)
 
 
 def _format_ref_source(ref: Reference) -> list[str]:
