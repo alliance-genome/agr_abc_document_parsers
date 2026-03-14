@@ -1480,11 +1480,13 @@ class TestCompetingInterestsParsing:
         </article>"""
         doc = parse_jats(xml)
         assert "No conflicts" in doc.competing_interests
-        all_notes = []
+        # Back-matter fn-group notes are stored as paragraphs
+        all_texts = []
         for sec in doc.back_matter:
-            all_notes.extend(sec.notes)
-        assert any("Some other note" in n for n in all_notes)
-        assert not any("No conflicts" in n for n in all_notes)
+            for p in sec.paragraphs:
+                all_texts.append(p.text)
+        assert any("Some other note" in t for t in all_texts)
+        assert not any("No conflicts" in t for t in all_texts)
 
 
 # -- Data availability parsing ---------------------------------------------
@@ -1521,13 +1523,14 @@ class TestDataAvailabilityParsing:
         doc = parse_jats(xml)
         assert "deposited at NCBI GEO" in doc.data_availability
 
-    def test_data_avail_excluded_from_back_matter(self):
-        """Data availability notes should NOT appear in back_matter."""
+    def test_data_avail_in_back_matter_with_heading(self):
+        """Data availability notes appear in back_matter with original heading."""
         xml = b"""<article>
           <front><article-meta></article-meta></front>
           <body><sec><title>Intro</title><p>Text.</p></sec></body>
           <back>
             <notes notes-type="data-availability">
+              <title>Data Availability Statement</title>
               <p>Data at GEO.</p>
             </notes>
             <notes>
@@ -1539,11 +1542,16 @@ class TestDataAvailabilityParsing:
         doc = parse_jats(xml)
         assert "Data at GEO" in doc.data_availability
         all_paras = []
+        all_headings = []
         for sec in doc.back_matter:
+            if sec.heading:
+                all_headings.append(sec.heading)
             for p in sec.paragraphs:
                 all_paras.append(p.text)
         assert any("publisher note" in t.lower() for t in all_paras)
-        assert not any("Data at GEO" in t for t in all_paras)
+        # Data availability is now also in back_matter with its heading
+        assert any("Data at GEO" in t for t in all_paras)
+        assert "Data Availability Statement" in all_headings
 
 
 # -- Supplementary material expanded coverage -------------------------------

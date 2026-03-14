@@ -584,6 +584,13 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
     return notes
 
 
+_COI_TITLES = {
+    "competing interests", "competing interest",
+    "conflicts of interest", "conflict of interest",
+    "conflict of interests",
+}
+
+
 def _parse_competing_interests(root: etree._Element) -> str:
     """Extract competing-interest statements from author-notes and back."""
     parts: list[str] = []
@@ -606,7 +613,29 @@ def _parse_competing_interests(root: etree._Element) -> str:
                     fn_text = all_text(fn)
                     if fn_text:
                         parts.append(fn_text)
+        # From back/notes with COI-statement type or matching title
+        if not parts:
+            for notes_elem in back.findall("notes"):
+                ntype = notes_elem.get("notes-type", "")
+                is_coi = ntype in _COI_FN_TYPES
+                if not is_coi:
+                    title_elem = notes_elem.find("title")
+                    if title_elem is not None:
+                        title_text = all_text(title_elem).strip().lower()
+                        is_coi = title_text in _COI_TITLES
+                if is_coi:
+                    for p in notes_elem.findall(".//p"):
+                        p_text = all_text(p)
+                        if p_text:
+                            parts.append(p_text)
     return "\n\n".join(parts)
+
+
+_DATA_AVAIL_TITLES = {
+    "data availability", "data availability statement",
+    "availability of data and materials",
+    "availability of data and material",
+}
 
 
 def _parse_data_availability(root: etree._Element) -> str:
@@ -623,6 +652,35 @@ def _parse_data_availability(root: etree._Element) -> str:
                     p_text = all_text(p)
                     if p_text:
                         parts.append(p_text)
+        # From back/notes with matching title or sec-type
+        if not parts:
+            for notes_elem in back.findall("notes"):
+                ntype = notes_elem.get("notes-type", "")
+                if ntype and ntype != "data-availability":
+                    continue
+                # Check notes title
+                title_elem = notes_elem.find("title")
+                if title_elem is not None:
+                    title_text = all_text(title_elem).strip().lower()
+                    if title_text in _DATA_AVAIL_TITLES:
+                        for p in notes_elem.findall(".//p"):
+                            p_text = all_text(p)
+                            if p_text:
+                                parts.append(p_text)
+                # Check nested <sec> with sec-type or title
+                for sec in notes_elem.findall("sec"):
+                    sec_type = sec.get("sec-type", "")
+                    sec_title = sec.find("title")
+                    sec_title_text = (
+                        all_text(sec_title).strip().lower()
+                        if sec_title is not None else ""
+                    )
+                    if (sec_type == "data-availability"
+                            or sec_title_text in _DATA_AVAIL_TITLES):
+                        for p in sec.findall("p"):
+                            p_text = all_text(p)
+                            if p_text:
+                                parts.append(p_text)
     # From custom-meta-group
     if not parts:
         for cm in root.findall(
@@ -1154,6 +1212,32 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
             href = graphic_elem.get("href", "")
         fig.graphic_url = href
 
+    # Footnotes inside <fig>/<p>/<fn> or <fig>/<fn>
+    fn_parts: list[str] = []
+    for fn in fig_elem.findall(".//fn"):
+        fn_text = all_text(fn).strip()
+        if fn_text:
+            fn_parts.append(fn_text)
+    if fn_parts:
+        fn_line = " ".join(fn_parts)
+        if fig.caption:
+            fig.caption = f"{fig.caption} {fn_line}"
+        else:
+            fig.caption = fn_line
+
+    # <abstract> children inside <fig> (used by some publishers for
+    # figure notes or multilingual captions)
+    for ab in fig_elem.findall("abstract"):
+        ab_parts = []
+        for p in ab.findall("p"):
+            ab_parts.append(_inline_text(p).strip())
+        ab_text = " ".join(t for t in ab_parts if t)
+        if ab_text:
+            if fig.caption:
+                fig.caption = f"{fig.caption} {ab_text}"
+            else:
+                fig.caption = ab_text
+
     return fig
 
 
@@ -1644,6 +1728,15 @@ def _parse_acknowledgments(
     if ack is None:
         return ""
 
+    # Check if <ack> title is a non-standard heading (e.g. COI disclosure)
+    ack_title_elem = ack.find("title")
+    ack_title = all_text(ack_title_elem) if ack_title_elem is not None else ""
+    _ACK_TITLES = {"acknowledgments", "acknowledgements", "acknowledgment",
+                   "acknowledgement"}
+    is_standard_ack = (
+        not ack_title or ack_title.lower().rstrip(":") in _ACK_TITLES
+    )
+
     parts: list[str] = []
     for p in ack.findall("./p"):
         p_text = all_text(p)
@@ -1654,6 +1747,15 @@ def _parse_acknowledgments(
     if ack_sections is not None:
         for sec in ack.findall("sec"):
             ack_sections.append(_parse_sec(sec, level=1))
+
+    # Non-standard <ack> title: route entire content to back_matter
+    if not is_standard_ack and ack_sections is not None:
+        section = Section(heading=ack_title, level=1)
+        for p_text in parts:
+            section.paragraphs.append(Paragraph(text=p_text))
+        if section.paragraphs or section.heading:
+            ack_sections.insert(0, section)
+        return ""
 
     return "\n\n".join(parts)
 
@@ -1715,6 +1817,62 @@ def _parse_appendices(root: etree._Element) -> list[Section]:
     return sections
 
 
+def _extract_fn_notes(fn: etree._Element, section: Section) -> None:
+    """Extract notes from a ``<fn>`` element.
+
+    When a ``<fn>`` has multiple ``<p>`` children, each ``<p>`` is
+    emitted as a separate note (the first is typically a heading).
+    A ``<label>`` prefix is prepended with a space separator.
+    """
+    p_elems = fn.findall("p")
+    label_elem = fn.find("label")
+    label_prefix = ""
+    if label_elem is not None:
+        label_text = all_text(label_elem).strip()
+        if label_text:
+            label_prefix = label_text + " "
+
+    if len(p_elems) >= 2:
+        for p in p_elems:
+            p_text = all_text(p).strip()
+            if p_text:
+                section.notes.append(label_prefix + p_text)
+                label_prefix = ""  # only prepend to first
+    else:
+        fn_text = all_text(fn).strip()
+        if fn_text:
+            section.notes.append(fn_text)
+
+
+def _extract_fn_paragraphs(fn: etree._Element, section: Section) -> None:
+    """Extract paragraphs from a ``<fn>`` element.
+
+    Like :func:`_extract_fn_notes` but stores content as paragraphs
+    rather than footnotes.  Used for back-matter ``<fn-group>`` entries
+    that are standalone statements (not inline footnotes).
+    """
+    p_elems = fn.findall("p")
+    label_elem = fn.find("label")
+    label_prefix = ""
+    if label_elem is not None:
+        label_text = all_text(label_elem).strip()
+        if label_text:
+            label_prefix = label_text + " "
+
+    if p_elems:
+        for p in p_elems:
+            p_text = all_text(p).strip()
+            if p_text:
+                section.paragraphs.append(
+                    Paragraph(text=label_prefix + p_text)
+                )
+                label_prefix = ""
+    else:
+        fn_text = all_text(fn).strip()
+        if fn_text:
+            section.paragraphs.append(Paragraph(text=fn_text))
+
+
 def _parse_back_sections(
     root: etree._Element,
     doc: Document | None = None,
@@ -1753,24 +1911,50 @@ def _parse_back_sections(
                 fn_type = fn.get("fn-type", "")
                 if fn_type in _COI_FN_TYPES:
                     continue
-                fn_text = all_text(fn)
-                if fn_text:
-                    section.notes.append(fn_text)
-            if section.notes or section.heading:
+                # Back-matter fn-group notes are standalone statements
+                # (not inline footnotes), so store as paragraphs for
+                # reliable roundtrip through Markdown.
+                _extract_fn_paragraphs(fn, section)
+            if section.paragraphs or section.heading:
                 sections.append(section)
         elif tag == "notes":
-            # Skip data-availability notes already captured
-            if child.get("notes-type") == "data-availability":
-                continue
             section = Section(level=1)
             title_elem = child.find("title")
             if title_elem is not None:
                 section.heading = all_text(title_elem)
             # Direct <p> children only (not descendants inside nested notes)
             for p in child.findall("./p"):
-                p_text = all_text(p)
-                if p_text:
-                    section.paragraphs.append(Paragraph(text=p_text))
+                # If <p> contains a <list>, extract list items separately
+                list_elem = p.find("list")
+                if list_elem is not None:
+                    # Text before the list
+                    pre_parts = []
+                    if p.text:
+                        pre_parts.append(p.text.strip())
+                    for sib in p:
+                        if sib is list_elem:
+                            break
+                        pre_parts.append(all_text(sib).strip())
+                        if sib.tail:
+                            pre_parts.append(sib.tail.strip())
+                    pre_text = " ".join(t for t in pre_parts if t)
+                    if pre_text:
+                        section.paragraphs.append(
+                            Paragraph(text=pre_text)
+                        )
+                    # List items as separate paragraphs
+                    for li in list_elem.findall("list-item"):
+                        li_text = all_text(li).strip()
+                        if li_text:
+                            section.paragraphs.append(
+                                Paragraph(text=li_text)
+                            )
+                else:
+                    p_text = all_text(p)
+                    if p_text:
+                        section.paragraphs.append(
+                            Paragraph(text=p_text)
+                        )
             # Nested <notes> and <sec> children → subsections
             for sub_notes in child.findall("./notes"):
                 sub_sec = Section(level=2)
@@ -1787,8 +1971,11 @@ def _parse_back_sections(
                 section.subsections.append(
                     _parse_sec(sub_sec_elem, level=2)
                 )
+            # <def-list> children (abbreviation tables, etc.)
+            for dl in child.findall("./def-list"):
+                _parse_def_list(dl, section)
             if (section.paragraphs or section.heading
-                    or section.subsections):
+                    or section.subsections or section.lists):
                 sections.append(section)
         elif tag == "supplementary-material":
             section = Section(level=1)

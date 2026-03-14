@@ -586,6 +586,20 @@ _METADATA_PATTERNS = [
     re.compile(r"^Papers of special note have been highlighted", re.I),
     # Supplement descriptions in PMC text
     re.compile(r"^Multimedia Appendix \d+", re.I),
+    # Publisher DOI identifiers repeated from <object-id> in <media> elements
+    re.compile(r"^10\.\d{4,}/\S+(?:\s+10\.\d{4,}/\S+)+$"),
+    # "Available at" URLs for peer review files (AME publisher artifact)
+    re.compile(r"^Available at https?://\S+$", re.I),
+    # Correction/erratum cross-references
+    re.compile(r"^This is a correction to:", re.I),
+    # Peer review declarations (short statements in sub-article metadata)
+    re.compile(r"^Reviewer declares none\.$", re.I),
+    # Peer review ORCID + reviewer info lines
+    re.compile(r"^https?://orcid\.org/\S+\s", re.I),
+    # Peer review recommendations (short metadata in sub-article)
+    re.compile(r"^Recommendation:\s", re.I),
+    # Symbol-prefixed disclaimers (publisher artifact with ☆/† label)
+    re.compile(r"^[☆†‡§¶*#]+\s*Disclaimer:", re.I),
 ]
 
 # Author listing patterns (individual author lines)
@@ -765,7 +779,9 @@ def _compare_article(
         doc = parse_jats(xml_data)
         md = emit_markdown(doc)
         doc_rt = read_markdown(md)
-        our_plain = extract_plain_text(doc_rt, include_supplements=False)
+        our_plain = extract_plain_text(
+            doc_rt, include_supplements=False, include_sub_articles=True,
+        )
     except Exception as exc:
         result["error"] = f"pipeline error: {exc}"
         result["verdict"] = "ERROR"

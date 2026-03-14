@@ -367,6 +367,13 @@ def _emit_competing_interests(doc: Document, lines: list[str]) -> None:
 def _emit_data_availability(doc: Document, lines: list[str]) -> None:
     if not doc.data_availability:
         return
+    # Skip if the content is already in back_matter with original heading
+    for section in doc.back_matter:
+        if section.paragraphs and any(
+            doc.data_availability[:40] in p.text
+            for p in section.paragraphs
+        ):
+            return
     lines.append("## Data Availability")
     lines.append("")
     lines.append(doc.data_availability)
@@ -379,8 +386,24 @@ def _emit_back_matter(
 ) -> None:
     if not doc.back_matter:
         return
-    _emit_sections(doc.back_matter, lines, base_level=2,
+    if footnote_counter is None:
+        footnote_counter = [0]
+    # Emit headed sections first, then headingless ones as footnotes
+    # to prevent headingless paragraphs from being absorbed by
+    # adjacent sections during markdown roundtrip.
+    headed = [s for s in doc.back_matter if s.heading]
+    headingless = [s for s in doc.back_matter if not s.heading]
+    _emit_sections(headed, lines, base_level=2,
                    footnote_counter=footnote_counter)
+    for section in headingless:
+        for para in section.paragraphs:
+            footnote_counter[0] += 1
+            lines.append(f"[^{footnote_counter[0]}]: {para.text}")
+        for note in section.notes:
+            footnote_counter[0] += 1
+            lines.append(f"[^{footnote_counter[0]}]: {note}")
+        if section.paragraphs or section.notes:
+            lines.append("")
 
 
 def _format_ref_source(ref: Reference) -> list[str]:

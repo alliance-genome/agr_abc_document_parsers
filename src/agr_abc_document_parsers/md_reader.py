@@ -101,6 +101,8 @@ def read_markdown(text: str) -> Document:
         pos = _skip_blank(lines, pos, n)
 
     # --- Author line (non-heading, non-keyword, non-bold-label before first H2) ---
+    # Author lines are typically short comma-separated names (< 300 chars)
+    # and don't end with sentence-ending punctuation.
     if (
         pos < n
         and _heading_level(lines[pos]) == 0
@@ -110,6 +112,8 @@ def read_markdown(text: str) -> Document:
         and not lines[pos].startswith("- ")
         and not lines[pos].startswith("> ")
         and not _FOOTNOTE_RE.match(lines[pos])
+        and len(lines[pos]) < 300
+        and not lines[pos].rstrip().endswith(".")
     ):
         doc.authors = _parse_author_line(lines[pos])
         pos += 1
@@ -295,6 +299,8 @@ def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
         pos = _skip_blank(chunk_lines, pos, n)
 
     # Optional author line (non-heading, non-H3)
+    # Author lines are short comma-separated names (< 300 chars)
+    # and don't end with sentence-ending punctuation.
     if (
         pos < n
         and _heading_level(chunk_lines[pos]) == 0
@@ -304,6 +310,8 @@ def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
         and not chunk_lines[pos].startswith("> ")
         and not _FOOTNOTE_RE.match(chunk_lines[pos])
         and not _BOLD_LABEL_RE.match(chunk_lines[pos])
+        and len(chunk_lines[pos]) < 300
+        and not chunk_lines[pos].rstrip().endswith(".")
     ):
         doc.authors = _parse_author_line(chunk_lines[pos])
         pos += 1
@@ -872,16 +880,17 @@ def _parse_section_lines(
             caption = m_label.group(2) or ""
 
             if _TABLE_LABEL_RE.match(label):
-                # Table caption — attach to preceding table
-                if last_table is not None:
+                # Table caption — attach to preceding table with rows
+                if last_table is not None and last_table.rows:
                     last_table.label = label
                     last_table.caption = caption
+                    capture_table_fns = True
                 else:
                     # Orphan table caption — create table with just caption
                     t = Table(label=label, caption=caption)
                     section.tables.append(t)
                     last_table = t
-                capture_table_fns = True
+                    capture_table_fns = False
                 table_fn_collected = 0
                 i += 1
                 continue
