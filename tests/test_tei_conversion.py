@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import difflib
 import gzip
-import io
 import json
 import os
 import re

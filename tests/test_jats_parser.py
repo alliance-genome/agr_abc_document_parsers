@@ -2950,7 +2950,7 @@ class TestTransAbstract:
             "  </trans-abstract>"
             "</article-meta></front>"
             "<body><sec><title>I</title><p>X.</p></sec></body></article>"
-        ).encode("utf-8")
+        ).encode()
         doc = parse_jats(xml)
         assert len(doc.abstract) == 1
         assert "English" in doc.abstract[0].text
@@ -2972,7 +2972,7 @@ class TestTransAbstract:
             "  </trans-abstract>"
             "</article-meta></front>"
             "<body><sec><title>I</title><p>X.</p></sec></body></article>"
-        ).encode("utf-8")
+        ).encode()
         doc = parse_jats(xml)
         assert len(doc.secondary_abstracts) == 1
         sa = doc.secondary_abstracts[0]

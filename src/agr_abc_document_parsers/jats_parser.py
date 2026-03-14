@@ -1450,7 +1450,7 @@ def _expand_rowspans(
     pending: dict[int, tuple[int, TableCell]] = {}
     result: list[list[TableCell]] = []
 
-    for row_idx, (row, spans) in enumerate(zip(rows, row_spans)):
+    for _row_idx, (row, spans) in enumerate(zip(rows, row_spans)):
         expanded: list[TableCell] = []
         src_col = 0  # index into the original row
         out_col = 0  # index into the expanded row
