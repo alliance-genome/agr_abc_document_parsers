@@ -201,12 +201,24 @@ def _escape_cell(cell_text: str) -> str:
 
 
 def _emit_table(table: Table, lines: list[str]) -> None:
-    if not table.rows:
-        return
-
     # Filter out empty rows and determine column count from widest row
     non_empty_rows = [row for row in table.rows if row]
+
     if not non_empty_rows:
+        # Image-only tables have no data rows but may have a caption.
+        if table.label or table.caption:
+            label = table.label.rstrip(".:").strip() if table.label else ""
+            if label and table.caption:
+                lines.append(f"**{label}.** {table.caption}")
+            elif label:
+                lines.append(f"**{label}.**")
+            elif table.caption:
+                lines.append(table.caption)
+            lines.append("")
+        if table.foot_notes:
+            for fn in table.foot_notes:
+                lines.append(fn)
+            lines.append("")
         return
     col_count = max(len(row) for row in non_empty_rows)
 

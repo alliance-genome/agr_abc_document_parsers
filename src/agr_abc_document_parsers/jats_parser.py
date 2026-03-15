@@ -31,6 +31,29 @@ from agr_abc_document_parsers.xml_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _inline_formula_text(elem: etree._Element) -> str:
+    """Extract readable text from an ``<inline-formula>`` element.
+
+    When ``<alternatives>`` provides both ``<tex-math>`` (raw LaTeX) and
+    MathML, prefers MathML to avoid dumping LaTeX preamble noise
+    (``\\documentclass…``) into paragraph text.  Falls back to
+    ``all_text()`` when MathML is unavailable.
+    """
+    alt = elem.find("alternatives")
+    search_in = alt if alt is not None else elem
+
+    # If alternatives has MathML, use it (skip noisy tex-math).
+    for ns_prefix in ("", "{http://www.w3.org/1998/Math/MathML}"):
+        mml = search_in.find(f"{ns_prefix}math")
+        if mml is not None:
+            mml_text = all_text(mml).strip()
+            if mml_text:
+                return mml_text
+
+    # Fallback: all_text (covers standalone short tex-math or plain text).
+    return all_text(elem)
+
+
 def parse_jats(
     xml_content: bytes,
     root: etree._Element | None = None,
@@ -81,7 +104,6 @@ def parse_jats(
     # Dedicated back-matter fields (extracted BEFORE generic back_matter
     # to allow deduplication — see _parse_back_sections skip logic)
     doc.funding, doc.funding_statement = _parse_funding(root)
-    _extract_funding_body_sections(doc)
     doc.author_notes = _parse_author_notes_field(root)
     doc.competing_interests = _parse_competing_interests(root)
     doc.data_availability = _parse_data_availability(root)
@@ -92,6 +114,10 @@ def parse_jats(
     back_matter.extend(ack_sections)
     back_matter.extend(_parse_back_sections(root, doc))
     doc.back_matter = back_matter
+
+    # Deduplicate "Funding" sections from both body and back-matter
+    # after all sections have been populated.
+    _extract_funding_body_sections(doc)
 
     # Parse floats-group (figures/tables outside body, common in PMC nXML)
     _parse_floats_group(root, doc)
@@ -531,25 +557,31 @@ def _parse_funding(
 
 
 def _extract_funding_body_sections(doc: Document) -> None:
-    """Move body sections named "Funding" into doc.funding_statement.
+    """Move sections named "Funding" into doc.funding_statement.
 
-    Some articles have a ``<sec>`` in the body titled "Funding" that
-    duplicates the structured ``<funding-group>`` from article-meta.
-    To avoid duplicate ``## Funding`` headings in Markdown (which causes
-    content loss on round-trip), merge these into funding_statement.
+    Some articles have a ``<sec>`` in the body or back-matter titled
+    "Funding" that duplicates the structured ``<funding-group>`` from
+    article-meta.  To avoid duplicate ``## Funding`` headings in
+    Markdown (which causes content loss on round-trip), merge these
+    into funding_statement.
     """
     _FUNDING_HEADINGS = {"funding", "funding statement"}
-    remaining: list[Section] = []
     extra_statements: list[str] = []
-    for sec in doc.sections:
-        if sec.heading.lower().strip() in _FUNDING_HEADINGS:
-            for p in sec.paragraphs:
-                if p.text:
-                    extra_statements.append(p.text)
-        else:
-            remaining.append(sec)
+
+    # Check both body sections and back-matter sections.
+    for attr in ("sections", "back_matter"):
+        source = getattr(doc, attr, [])
+        remaining: list[Section] = []
+        for sec in source:
+            if sec.heading.lower().strip() in _FUNDING_HEADINGS:
+                for p in sec.paragraphs:
+                    if p.text:
+                        extra_statements.append(p.text)
+            else:
+                remaining.append(sec)
+        setattr(doc, attr, remaining)
+
     if extra_statements:
-        doc.sections = remaining
         parts = []
         if doc.funding_statement:
             parts.append(doc.funding_statement)
@@ -1082,7 +1114,9 @@ def _inline_text(elem: etree._Element) -> str:
         tag = etree.QName(child.tag).localname if isinstance(
             child.tag, str
         ) else ""
-        if tag in _INLINE_FMT:
+        if tag == "inline-formula":
+            parts.append(_inline_formula_text(child))
+        elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
                 pre, suf = _INLINE_FMT[tag]
@@ -1148,6 +1182,8 @@ def _parse_paragraph(
                 parts.append(link_text)
         elif tag == "email":
             parts.append(all_text(child))
+        elif tag == "inline-formula":
+            parts.append(_inline_formula_text(child))
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
@@ -1649,6 +1685,8 @@ def _p_text_skip_blocks(p_elem: etree._Element) -> str:
                 pass  # skip LaTeX content, keep tail
             else:
                 parts.append(all_text(child))
+        elif tag == "inline-formula":
+            parts.append(_inline_formula_text(child))
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
@@ -1824,60 +1862,51 @@ def _parse_acknowledgments(
 
 
 def _parse_appendices(root: etree._Element) -> list[Section]:
-    """Extract appendices from back/app-group."""
+    """Extract appendices from back/app-group and standalone back/app."""
     sections: list[Section] = []
     back = root.find("back")
     if back is None:
         back = root.find(".//back")
-    app_group = back.find("app-group") if back is not None else None
-    if app_group is None:
+    if back is None:
         return sections
 
-    for app in app_group.findall("app"):
-        section = Section(level=1)
-        title_elem = app.find("title")
-        if title_elem is not None:
-            section.heading = all_text(title_elem)
-        # Parse sub-sections within appendix
-        for sec in app.findall("sec"):
-            section.subsections.append(_parse_sec(sec, level=2))
-        for p in app.findall("p"):
-            section.paragraphs.append(_parse_paragraph(p))
-        for tw in app.findall("table-wrap"):
-            section.tables.append(_parse_table_wrap(tw))
-        for fig in app.findall("fig"):
-            section.figures.append(_parse_fig(fig))
-        for supp in app.findall("supplementary-material"):
-            _parse_supplementary(supp, section)
-        for fn_grp in app.findall("fn-group"):
-            for fn in fn_grp.findall("fn"):
-                fn_text = all_text(fn)
-                if fn_text:
-                    section.notes.append(fn_text)
-        sections.append(section)
+    # Process ALL <app-group> elements (some articles have multiple).
+    for app_group in back.findall("app-group"):
+        for app in app_group.findall("app"):
+            sections.append(_parse_single_app(app))
 
     # Also handle standalone <app> directly under <back> (without app-group)
-    if back is not None:
-        for app in back.findall("app"):
-            section = Section(level=1)
-            title_elem = app.find("title")
-            if title_elem is not None:
-                section.heading = all_text(title_elem)
-            for sec in app.findall("sec"):
-                section.subsections.append(_parse_sec(sec, level=2))
-            for p in app.findall("p"):
-                section.paragraphs.append(_parse_paragraph(p))
-            for tw in app.findall("table-wrap"):
-                section.tables.append(_parse_table_wrap(tw))
-            for fig in app.findall("fig"):
-                section.figures.append(_parse_fig(fig))
-            for supp in app.findall("supplementary-material"):
-                _parse_supplementary(supp, section)
-            if (section.heading or section.paragraphs or section.tables
-                    or section.figures or section.subsections):
-                sections.append(section)
+    for app in back.findall("app"):
+        section = _parse_single_app(app)
+        if (section.heading or section.paragraphs or section.tables
+                or section.figures or section.subsections):
+            sections.append(section)
 
     return sections
+
+
+def _parse_single_app(app: etree._Element) -> Section:
+    """Parse a single ``<app>`` element into a Section."""
+    section = Section(level=1)
+    title_elem = app.find("title")
+    if title_elem is not None:
+        section.heading = all_text(title_elem)
+    for sec in app.findall("sec"):
+        section.subsections.append(_parse_sec(sec, level=2))
+    for p in app.findall("p"):
+        section.paragraphs.append(_parse_paragraph(p))
+    for tw in app.findall("table-wrap"):
+        section.tables.append(_parse_table_wrap(tw))
+    for fig in app.findall("fig"):
+        section.figures.append(_parse_fig(fig))
+    for supp in app.findall("supplementary-material"):
+        _parse_supplementary(supp, section)
+    for fn_grp in app.findall("fn-group"):
+        for fn in fn_grp.findall("fn"):
+            fn_text = all_text(fn)
+            if fn_text:
+                section.notes.append(fn_text)
+    return section
 
 
 def _extract_fn_notes(fn: etree._Element, section: Section) -> None:
@@ -2030,6 +2059,14 @@ def _parse_back_sections(
                     if p_text:
                         section.paragraphs.append(
                             Paragraph(text=p_text)
+                        )
+            # Direct <list> children (not inside <p>).
+            for list_elem in child.findall("./list"):
+                for li in list_elem.findall("list-item"):
+                    li_text = all_text(li).strip()
+                    if li_text:
+                        section.paragraphs.append(
+                            Paragraph(text=li_text)
                         )
             # Nested <notes> and <sec> children → subsections
             for sub_notes in child.findall("./notes"):

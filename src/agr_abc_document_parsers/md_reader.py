@@ -568,11 +568,25 @@ def _parse_acknowledgments_lines(content_lines: list[str]) -> str:
 
 
 def _parse_funding_section(content_lines: list[str], doc: Document) -> None:
-    """Parse ``## Funding`` content into funding entries and statement."""
+    """Parse ``## Funding`` content into funding entries and statement.
+
+    Structured entries (``Funder: AwardID``) appear first, separated
+    from an optional prose funding statement by a blank line.  Once a
+    blank line is seen after at least one entry, all remaining lines
+    are treated as the statement text (even if they contain colons).
+    """
     entries: list[FundingEntry] = []
     statement_lines: list[str] = []
+    in_statement = False
     for line in content_lines:
+        if in_statement:
+            if line.strip():
+                statement_lines.append(line)
+            continue
         if not line.strip():
+            # Blank line after entries → switch to statement mode.
+            if entries:
+                in_statement = True
             continue
         m = _FUNDING_ENTRY_RE.match(line)
         if m:
