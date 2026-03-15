@@ -13,9 +13,13 @@ from agr_abc_document_parsers.models import Document, Figure, Section, Table
 _STRIP_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\*\*(.+?)\*\*"), r"\1"),          # **bold**
     (re.compile(r"\*(.+?)\*"), r"\1"),               # *italic*
+    (re.compile(r"~~(.+?)~~"), r"\1"),               # ~~strikethrough~~
+    (re.compile(r"<u>(.+?)</u>", re.I), r"\1"),     # <u>underline</u>
     (re.compile(r"<sup>(.+?)</sup>", re.I), r"\1"),  # <sup>x</sup>
     (re.compile(r"<sub>(.+?)</sub>", re.I), r"\1"),  # <sub>x</sub>
+    (re.compile(r"`(.+?)`"), r"\1"),                 # `monospace`
     (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),   # [text](url)
+    (re.compile(r"\\([*])"), r"\1"),                 # \* → * (unescape)
 ]
 
 # Sentence splitting: split on .!? followed by whitespace + uppercase letter,
@@ -112,9 +116,19 @@ def extract_plain_text(
         parts.append("Acknowledgments")
         parts.append(strip_markdown_formatting(doc.acknowledgments))
 
-    if doc.funding_statement:
+    if doc.funding_statement or doc.funding:
         parts.append("Funding")
-        parts.append(strip_markdown_formatting(doc.funding_statement))
+        if doc.funding:
+            for entry in doc.funding:
+                ids = ", ".join(entry.award_ids) if entry.award_ids else ""
+                if ids:
+                    parts.append(f"{entry.funder}: {ids}")
+                else:
+                    parts.append(entry.funder)
+        if doc.funding_statement:
+            parts.append(strip_markdown_formatting(
+                doc.funding_statement
+            ))
     if doc.author_notes:
         parts.append("Author Notes")
         for note in doc.author_notes:
@@ -127,6 +141,13 @@ def extract_plain_text(
         parts.append(strip_markdown_formatting(doc.data_availability))
 
     _collect_sections_text(doc.back_matter, parts)
+
+    # Reference annotation notes (note-only refs without citation data).
+    for ref in doc.references:
+        if not ref.authors and not ref.journal and not ref.year:
+            note_text = ref.comment or ref.title
+            if note_text:
+                parts.append(strip_markdown_formatting(note_text))
 
     if include_supplements:
         for supp in doc.supplements:

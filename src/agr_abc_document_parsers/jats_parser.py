@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from copy import deepcopy
 
 from lxml import etree
 
@@ -31,6 +32,31 @@ from agr_abc_document_parsers.xml_utils import (
 logger = logging.getLogger(__name__)
 
 
+def _extract_tex_body(tex_content: str) -> str:
+    """Extract the formula body from a LaTeX document string.
+
+    Given tex-math content like ``\\documentclass...\\begin{document}
+    $$formula$$\\end{document}``, return just ``formula`` (stripping
+    the ``$$`` delimiters).  Returns empty string if the markers are
+    not found or the body is empty.
+    """
+    marker = "\\begin{document}"
+    idx = tex_content.find(marker)
+    if idx == -1:
+        return ""
+    start = idx + len(marker)
+    end = tex_content.find("\\end{document}", start)
+    if end == -1:
+        return ""
+    body = tex_content[start:end].strip()
+    # Strip $$ delimiters that commonly wrap the formula body.
+    if body.startswith("$$") and body.endswith("$$"):
+        body = body[2:-2].strip()
+    elif body.startswith("$") and body.endswith("$"):
+        body = body[1:-1].strip()
+    return body
+
+
 def _inline_formula_text(elem: etree._Element) -> str:
     """Extract readable text from an ``<inline-formula>`` element.
 
@@ -50,7 +76,17 @@ def _inline_formula_text(elem: etree._Element) -> str:
             if mml_text:
                 return mml_text
 
-    # Fallback: all_text (covers standalone short tex-math or plain text).
+    # Fallback: extract formula body from tex-math preamble if present.
+    tex = search_in.find("tex-math")
+    if tex is not None:
+        tex_content = text(tex).strip()
+        if tex_content and "\\begin{document}" in tex_content:
+            body = _extract_tex_body(tex_content)
+            if body:
+                return body
+
+    # Final fallback: all_text (covers standalone short tex-math or
+    # plain text).
     return all_text(elem)
 
 
@@ -460,8 +496,11 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
     doc = Document(source_format="jats")
     doc.article_type = sub_el.get("article-type", "")
 
-    # Front stub metadata
+    # Front stub metadata — some publishers use <front>/<article-meta>
+    # instead of the abbreviated <front-stub>.
     front_stub = sub_el.find("front-stub")
+    if front_stub is None:
+        front_stub = sub_el.find("front/article-meta")
     if front_stub is not None:
         title_el = front_stub.find("title-group/article-title")
         if title_el is not None:
@@ -471,7 +510,22 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
         aff_map: dict[str, str] = {}
         for aff_elem in front_stub.findall("aff"):
             aff_id = aff_elem.get("id", "")
-            aff_text = all_text(aff_elem)
+            # Extract text excluding <label> to avoid double-numbering.
+            parts: list[str] = []
+            for child in aff_elem:
+                tag = etree.QName(child.tag).localname
+                if tag == "label":
+                    if child.tail:
+                        parts.append(child.tail)
+                    continue
+                parts.append(all_text(child))
+                if child.tail:
+                    parts.append(child.tail)
+            if not parts and aff_elem.text:
+                parts.append(aff_elem.text)
+            aff_text = " ".join(
+                "".join(parts).split()
+            )
             if aff_id and aff_text:
                 aff_map[aff_id] = aff_text
         for contrib in front_stub.findall(
@@ -482,6 +536,11 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
             if name_elem is not None:
                 author.surname = text(name_elem.find("surname"))
                 author.given_name = text(name_elem.find("given-names"))
+            # Assign affiliations via xref
+            for xref in contrib.findall("xref[@ref-type='aff']"):
+                rid = xref.get("rid", "")
+                if rid and rid in aff_map:
+                    author.affiliations.append(aff_map[rid])
             for role_el in contrib.findall("role"):
                 role_text = all_text(role_el)
                 if role_text:
@@ -498,7 +557,18 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
                 author = Author()
                 author.surname = text(name_elem.find("surname"))
                 author.given_name = text(name_elem.find("given-names"))
+                for xref in contrib.findall("xref[@ref-type='aff']"):
+                    rid = xref.get("rid", "")
+                    if rid and rid in aff_map:
+                        author.affiliations.append(aff_map[rid])
                 doc.authors.append(author)
+
+        # Corresponding author notes
+        for notes_el in front_stub.findall("author-notes"):
+            for corresp in notes_el.findall("corresp"):
+                ct = all_text(corresp)
+                if ct:
+                    doc.author_notes.append(ct)
 
     # Body
     doc.sections = _parse_body(sub_el)
@@ -831,6 +901,8 @@ def _parse_body(root: etree._Element) -> list[Section]:
             preamble.figures.append(_parse_standalone_graphic(child))
         elif tag == "media":
             _parse_media_as_paragraph(child, preamble)
+        elif tag == "speech":
+            _parse_speech(child, preamble)
         elif tag in _SEC_BLOCK_TAGS:
             _dispatch_sec_block(child, tag, preamble)
         elif tag in _GROUP_CONTAINER_TAGS:
@@ -926,6 +998,32 @@ def _dispatch_group_container(
             section.formulas.append(_parse_formula(df_elem))
 
 
+def _parse_speech(speech_elem: etree._Element, section: Section) -> None:
+    """Parse a <speech> element into paragraphs.
+
+    A <speech> contains a <speaker> followed by one or more <p> elements.
+    The speaker text is prepended to the first paragraph; subsequent
+    paragraphs are emitted standalone.
+    """
+    speaker_elem = speech_elem.find("speaker")
+    speaker_text = all_text(speaker_elem).strip() if speaker_elem is not None else ""
+    paragraphs = speech_elem.findall("p")
+    for i, p_elem in enumerate(paragraphs):
+        p_text = all_text(p_elem)
+        if not p_text:
+            continue
+        if i == 0 and speaker_text:
+            # Ensure a space between speaker label and content
+            if speaker_text.endswith(":"):
+                p_text = speaker_text + " " + p_text
+            else:
+                p_text = speaker_text + ": " + p_text
+        section.paragraphs.append(Paragraph(text=p_text))
+    # Fallback: if no <p> children, emit speaker text alone
+    if not paragraphs and speaker_text:
+        section.paragraphs.append(Paragraph(text=speaker_text))
+
+
 def _dispatch_sec_child(
     child: etree._Element, tag: str,
     section: Section, level: int,
@@ -949,13 +1047,15 @@ def _dispatch_sec_child(
         section.figures.append(_parse_standalone_graphic(child))
     elif tag == "media":
         _parse_media_as_paragraph(child, section)
+    elif tag == "speech":
+        _parse_speech(child, section)
     elif tag in _SEC_BLOCK_TAGS:
         _dispatch_sec_block(child, tag, section)
     elif tag in _GROUP_CONTAINER_TAGS:
         _dispatch_group_container(child, tag, section, level)
     else:
         # Fallback: extract text from unrecognized block elements
-        # (e.g., <speech>, <verse-group>, <statement>, <code>,
+        # (e.g., <verse-group>, <statement>, <code>,
         # <chem-struct-wrap>, <array>) to prevent silent content loss.
         fallback_text = all_text(child)
         if fallback_text:
@@ -1033,17 +1133,17 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
                 href = child.get("href", "")
             if link_text and href and link_text != href:
                 parts.append(f"[{link_text}]({href})")
-            elif href:
-                parts.append(href)
             elif link_text:
                 parts.append(link_text)
+            # Skip self-closing/empty ext-link — no visible text.
         elif tag == "email":
             parts.append(all_text(child))
+        elif tag == "inline-formula":
+            parts.append(_inline_formula_text(child))
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
-                pre, suf = _INLINE_FMT[tag]
-                parts.append(f"{pre}{inner}{suf}")
+                parts.append(_wrap_inline(tag, inner))
         else:
             inner = _inline_text(child)
             parts.append(inner)
@@ -1100,6 +1200,20 @@ _INLINE_FMT: dict[str, tuple[str, str]] = {
 }
 
 
+def _wrap_inline(tag: str, inner: str) -> str:
+    """Wrap *inner* with the markdown markers for *tag*, escaping conflicts.
+
+    When ``<bold>*</bold>`` is naively wrapped as ``***``, the result is
+    ambiguous markdown.  This helper escapes inner ``*`` characters when
+    the wrapper itself uses ``*`` to avoid such collisions.
+    """
+    pre, suf = _INLINE_FMT[tag]
+    if "*" in pre and inner.strip("*") == "":
+        # Inner text is only asterisks — escape each one.
+        inner = inner.replace("*", r"\*")
+    return f"{pre}{inner}{suf}"
+
+
 def _inline_text(elem: etree._Element) -> str:
     """Recursively format inline content, preserving nested markup.
 
@@ -1119,8 +1233,7 @@ def _inline_text(elem: etree._Element) -> str:
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
-                pre, suf = _INLINE_FMT[tag]
-                parts.append(f"{pre}{inner}{suf}")
+                parts.append(_wrap_inline(tag, inner))
         elif tag == "break":
             parts.append("\n")
         else:
@@ -1176,10 +1289,9 @@ def _parse_paragraph(
                 href = child.get("href", "")
             if link_text and href and link_text != href:
                 parts.append(f"[{link_text}]({href})")
-            elif href:
-                parts.append(href)
             elif link_text:
                 parts.append(link_text)
+            # Skip self-closing/empty ext-link — no visible text.
         elif tag == "email":
             parts.append(all_text(child))
         elif tag == "inline-formula":
@@ -1187,8 +1299,7 @@ def _parse_paragraph(
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
-                pre, suf = _INLINE_FMT[tag]
-                parts.append(f"{pre}{inner}{suf}")
+                parts.append(_wrap_inline(tag, inner))
         else:
             # Recurse via _inline_text to preserve nested formatting
             # inside container elements (named-content, styled-content, etc.)
@@ -1307,6 +1418,24 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
                 fig.caption = f"{fig.caption} {ab_text}"
             else:
                 fig.caption = ab_text
+
+    # Direct <p> children of <fig> (not inside <caption> or <abstract>).
+    # Some publishers put extra text like "Reagents and conditions: ..."
+    # as bare <p> elements within <fig>, after the <graphic>.
+    for p in fig_elem.findall("p"):
+        # Skip <p> elements that contain only <fn> children (already
+        # handled above) — check if all meaningful text is inside <fn>.
+        fn_children = p.findall("fn")
+        if fn_children:
+            # If removing all <fn> leaves no text, skip this <p>
+            p_copy = deepcopy(p)
+            for fn in p_copy.findall("fn"):
+                p_copy.remove(fn)
+            if not all_text(p_copy).strip():
+                continue
+        p_text = _inline_text(p).strip()
+        if p_text:
+            fig.caption_paragraphs.append(p_text)
 
     return fig
 
@@ -1472,6 +1601,44 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
     return table
 
 
+def _formula_aware_text(elem: etree._Element) -> str:
+    """Extract text from an element, handling inline-formulas properly.
+
+    Like ``all_text()`` but uses ``_inline_formula_text()`` for any
+    ``<inline-formula>`` descendants to avoid dumping LaTeX preamble
+    noise from ``<tex-math>`` elements.  Falls back to ``all_text()``
+    when no inline-formulas are present (fast path).
+    """
+    # Fast path: if no inline-formula descendants, use all_text directly.
+    has_formula = False
+    for _ in elem.iter("inline-formula"):
+        has_formula = True
+        break
+    if not has_formula:
+        return all_text(elem)
+
+    # Slow path: walk children, using _inline_formula_text for formulas.
+    return _formula_aware_text_walk(elem)
+
+
+def _formula_aware_text_walk(elem: etree._Element) -> str:
+    """Recursively extract text from an element, handling inline-formulas."""
+    parts: list[str] = []
+    if elem.text:
+        parts.append(elem.text)
+    for child in elem:
+        tag = etree.QName(child.tag).localname if isinstance(
+            child.tag, str
+        ) else ""
+        if tag == "inline-formula":
+            parts.append(_inline_formula_text(child))
+        else:
+            parts.append(_formula_aware_text_walk(child))
+        if child.tail:
+            parts.append(child.tail)
+    return "".join(parts).strip()
+
+
 def _parse_table_row(
     tr_elem: etree._Element, is_header: bool,
 ) -> tuple[list[TableCell], list[int]]:
@@ -1586,46 +1753,36 @@ def _parse_formula(formula_elem: etree._Element) -> Formula:
 
 
 def _extract_formula_text(elem: etree._Element) -> str:
-    """Extract the best text representation from a formula element.
+    """Extract text from a formula element.
 
-    Priority order:
-    1. ``<tex-math>`` — raw LaTeX, most readable for downstream use
-    2. ``<mml:math>`` — extract text nodes from MathML
-    3. ``all_text()`` — fallback for plain text formulas
-
-    Handles ``<alternatives>`` containers that wrap multiple representations.
+    Priority: clean tex-math > MathML (for preamble articles) > raw tex-math.
+    PMC S3 uses MathML text when available, raw LaTeX otherwise.
     """
     # Check for <alternatives> wrapper
     alt = elem.find("alternatives")
     search_in = alt if alt is not None else elem
 
-    # 1. Try tex-math (raw LaTeX string)
+    # 1. Clean tex-math (no preamble) — most readable
     tex = search_in.find("tex-math")
+    tex_content = ""
     if tex is not None:
         tex_content = text(tex).strip()
-        if tex_content:
+        if tex_content and "\\documentclass" not in tex_content:
             return tex_content
 
-    # 2. Try MathML — extract text from annotation or mi/mn/mo elements
+    # 2. MathML — for articles with preamble-only tex-math
     for ns_prefix in ("", "{http://www.w3.org/1998/Math/MathML}"):
         mml = search_in.find(f"{ns_prefix}math")
         if mml is not None:
-            # Prefer annotation with encoding="LaTeX" or "TeX"
-            for ann in mml.iter(
-                f"{ns_prefix}annotation",
-                "{http://www.w3.org/1998/Math/MathML}annotation",
-            ):
-                encoding = (ann.get("encoding") or "").lower()
-                if "tex" in encoding or "latex" in encoding:
-                    ann_text = text(ann).strip()
-                    if ann_text:
-                        return ann_text
-            # Fall back to all_text on the math element
-            math_text = all_text(mml).strip()
-            if math_text:
-                return math_text
+            mml_text = all_text(mml).strip()
+            if mml_text:
+                return mml_text
 
-    # 3. Fallback
+    # 3. Raw tex-math (may contain preamble) — matches PMC S3
+    if tex_content:
+        return tex_content
+
+    # 4. Fallback
     return all_text(elem)
 
 
@@ -1690,8 +1847,7 @@ def _p_text_skip_blocks(p_elem: etree._Element) -> str:
         elif tag in _INLINE_FMT:
             inner = _inline_text(child)
             if inner:
-                pre, suf = _INLINE_FMT[tag]
-                parts.append(f"{pre}{inner}{suf}")
+                parts.append(_wrap_inline(tag, inner))
         else:
             parts.append(all_text(child))
         if child.tail:
@@ -2321,6 +2477,16 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
 
     citation = _find_citation(ref_elem)
     if citation is None:
+        # Fallback: some <ref> elements contain only <note> (e.g.
+        # reference annotations like "•• of considerable interest").
+        note = ref_elem.find("note")
+        if note is not None:
+            note_p = note.find("p")
+            note_text = all_text(note_p) if note_p is not None else (
+                all_text(note)
+            )
+            if note_text:
+                ref.comment = note_text
         return ref
 
     _parse_ref_authors(citation, ref)

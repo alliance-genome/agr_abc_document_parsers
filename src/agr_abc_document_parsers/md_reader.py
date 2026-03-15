@@ -591,6 +591,12 @@ def _parse_funding_section(content_lines: list[str], doc: Document) -> None:
         m = _FUNDING_ENTRY_RE.match(line)
         if m:
             funder = m.group(1).strip()
+            # If the part before the colon has unbalanced parentheses,
+            # the colon is inside a parenthetical (e.g. "(NIH-NCMHD:
+            # 2P60MD...") — treat as prose, not a structured entry.
+            if funder.count("(") != funder.count(")"):
+                statement_lines.append(line)
+                continue
             ids = [x.strip() for x in m.group(2).split(",") if x.strip()]
             entries.append(FundingEntry(funder=funder, award_ids=ids))
         else:

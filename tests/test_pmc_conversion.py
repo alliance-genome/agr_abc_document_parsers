@@ -167,36 +167,60 @@ def _extract_bioc_paragraphs(bioc_json: dict[str, Any]) -> list[str]:
 
 
 def _fetch_random_pmcids(count: int, api_key: str | None) -> list[str]:
-    """Fetch random Open Access PMCIDs using NCBI esearch."""
-    params = (
-        f"?db=pmc&term=open+access[filter]&rettype=count"
-        f"&usehistory=n{_ncbi_params(api_key)}"
-    )
-    _rate_limit(api_key)
-    data = _fetch_url(f"{_ESEARCH_URL}{params}")
-    count_match = re.search(rb"<Count>(\d+)</Count>", data)
-    if not count_match:
-        return []
-    total = int(count_match.group(1))
+    """Fetch random Open Access PMCIDs using NCBI esearch.
+
+    Uses random year ranges (2000–current) with capped retstart to avoid
+    the NCBI esearch retstart limit of 9998 for PMC.
+    """
+    # NCBI esearch caps retstart at 9998 for PMC — using random year
+    # ranges keeps retstart small while sampling diverse articles.
+    _RETSTART_MAX = 9998
+    current_year = 2026  # avoid datetime import
+    years = list(range(2000, current_year + 1))
 
     pmcids: list[str] = []
+    seen: set[str] = set()
     batch_size = min(count, 100)
-    while len(pmcids) < count:
-        retstart = random.randint(0, max(0, total - batch_size))
-        needed = min(batch_size, count - len(pmcids))
+    stale_rounds = 0
+    max_stale = 10
+
+    while len(pmcids) < count and stale_rounds < max_stale:
+        year = random.choice(years)
+        # First get the count for this year to cap retstart
         params = (
-            f"?db=pmc&term=open+access[filter]&retmax={needed}"
-            f"&retstart={retstart}&sort=pub_date"
+            f"?db=pmc&term=open+access[filter]+AND+{year}[pdat]"
+            f"&rettype=count&usehistory=n{_ncbi_params(api_key)}"
+        )
+        _rate_limit(api_key)
+        data = _fetch_url(f"{_ESEARCH_URL}{params}")
+        count_match = re.search(rb"<Count>(\d+)</Count>", data)
+        if not count_match:
+            continue
+        year_total = int(count_match.group(1))
+        if year_total == 0:
+            continue
+
+        needed = min(batch_size, count - len(pmcids))
+        max_start = min(_RETSTART_MAX, max(0, year_total - needed))
+        retstart = random.randint(0, max_start)
+        params = (
+            f"?db=pmc&term=open+access[filter]+AND+{year}[pdat]"
+            f"&retmax={needed}&retstart={retstart}&sort=pub_date"
             f"{_ncbi_params(api_key)}"
         )
         _rate_limit(api_key)
         data = _fetch_url(f"{_ESEARCH_URL}{params}")
+        added = 0
         for m in re.finditer(rb"<Id>(\d+)</Id>", data):
             pmcid = m.group(1).decode()
-            if pmcid not in pmcids:
+            if pmcid not in seen:
+                seen.add(pmcid)
                 pmcids.append(pmcid)
+                added += 1
                 if len(pmcids) >= count:
                     break
+        stale_rounds = 0 if added > 0 else stale_rounds + 1
+
     return pmcids
 
 
@@ -339,6 +363,16 @@ def _parse_pmc_text(raw_text: str) -> dict[str, Any]:
     if current:
         paragraphs.append("\n".join(current))
 
+    # Filter out sub-article PMC S3 metadata headers (JOURNAL/ARTICLE
+    # INFORMATION blocks) that appear mid-text for sub-articles.
+    paragraphs = [
+        p for p in paragraphs
+        if not (
+            p.startswith("JOURNAL INFORMATION\n")
+            or p.startswith("ARTICLE INFORMATION\n")
+        )
+    ]
+
     # Detect where references start
     # References are bare citation lines: "Author . Title. Journal Vol, Pages (Year).PMID DOI"
     # Heuristic: a sequence of 3+ consecutive paragraphs matching reference pattern
@@ -395,6 +429,7 @@ def _parse_pmc_text(raw_text: str) -> dict[str, Any]:
 _PMID_PATTERN = re.compile(r"\d{7,8}")
 _DOI_PATTERN = re.compile(r"10\.\d{4,}")
 _YEAR_PATTERN = re.compile(r"\(\d{4}\)")
+_BARE_YEAR_PATTERN = re.compile(r"\b(18|19|20)\d{2}\b")
 
 
 def _detect_reference_start(paragraphs: list[str]) -> int | None:
@@ -450,13 +485,17 @@ def _detect_reference_start(paragraphs: list[str]) -> int | None:
     )
     for i, para in enumerate(paragraphs):
         if _REF_HEADING_RE.match(para.strip()):
-            # Check if any subsequent paragraph looks like a citation
+            # Check if any subsequent paragraph looks like a citation.
+            # Accept bare years (e.g. "2000", "1993") in addition to
+            # parenthesized years, PMIDs and DOIs -- many short PMC
+            # reference lists lack identifiers entirely.
             for j in range(i + 1, len(paragraphs)):
                 subsequent = paragraphs[j]
                 has_year = bool(_YEAR_PATTERN.search(subsequent))
+                has_bare_year = bool(_BARE_YEAR_PATTERN.search(subsequent))
                 has_pmid = bool(_PMID_PATTERN.search(subsequent))
                 has_doi = bool(_DOI_PATTERN.search(subsequent))
-                if has_year or has_pmid or has_doi:
+                if has_year or has_bare_year or has_pmid or has_doi:
                     return i
             break
 
@@ -475,6 +514,46 @@ def _detect_reference_start(paragraphs: list[str]) -> int | None:
         # Stop scanning backwards if we hit a substantive body paragraph
         elif len(para) > 100:
             break
+
+    # Strategy 5: last paragraph is a multi-line block of bare citations
+    # (e.g. short letters with only 2 references, no PMIDs/DOIs).
+    # Each line matches "Surname ... (YYYY) Title..." citation format.
+    _BARE_CITATION_RE = re.compile(r"^[A-Z][a-z]+\s.*?\(\d{4}\)\s")
+    if paragraphs:
+        last = paragraphs[-1]
+        cite_lines = [ln.strip() for ln in last.split("\n") if ln.strip()]
+        if len(cite_lines) >= 2 and all(_BARE_CITATION_RE.match(ln) for ln in cite_lines):
+            return len(paragraphs) - 1
+
+    # Strategy 6: trailing paragraph(s) that are bare citation blocks.
+    # Many short PMC articles (letters, abstracts) have a small reference
+    # list at the very end without a "References" heading.  Each line
+    # contains a bare year (18xx/19xx/20xx).  For multi-line paragraphs
+    # we require every line to carry a bare year; for single-line
+    # paragraphs we additionally require a PMID, DOI, or the citation
+    # ending pattern (year followed by optional page/volume numbers).
+    _ENDS_YEAR_NUMS_RE = re.compile(r"\b(?:18|19|20)\d{2}\b[\s\d]*$")
+    if paragraphs:
+        last = paragraphs[-1]
+        cite_lines = [ln.strip() for ln in last.split("\n") if ln.strip()]
+        if cite_lines:
+            all_have_year = all(
+                _BARE_YEAR_PATTERN.search(ln) for ln in cite_lines
+            )
+            if all_have_year:
+                has_pmid = bool(_PMID_PATTERN.search(last))
+                has_doi = bool(_DOI_PATTERN.search(last))
+                if len(cite_lines) >= 2:
+                    # Multi-line: every line having a bare year is strong
+                    # enough evidence on its own.
+                    return len(paragraphs) - 1
+                elif has_pmid or has_doi:
+                    # Single-line with identifier.
+                    return len(paragraphs) - 1
+                elif _ENDS_YEAR_NUMS_RE.search(last.strip()):
+                    # Single-line ending with year + optional page/vol
+                    # numbers (common in stripped citations without ids).
+                    return len(paragraphs) - 1
 
     return None
 
@@ -967,11 +1046,27 @@ def pytest_generate_tests(metafunc):
 
 @pytest.fixture(scope="session")
 def pmc_api_key(request):
-    """Resolve NCBI API key."""
+    """Resolve NCBI API key from CLI, env var, or .env file."""
     key = request.config.getoption("--ncbi-api-key", default=None)
     if key:
         return key
-    return os.environ.get("NCBI_API_KEY")
+    key = os.environ.get("NCBI_API_KEY")
+    if key:
+        return key
+    # Fall back to .env file at project root.
+    env_file = Path(__file__).parent.parent / ".env"
+    if env_file.exists():
+        try:
+            from dotenv import dotenv_values
+            env = dotenv_values(env_file)
+            return env.get("NCBI_API_KEY")
+        except ImportError:
+            # Parse manually if python-dotenv not installed.
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("NCBI_API_KEY=") and not line.startswith("#"):
+                    return line.split("=", 1)[1].strip()
+    return None
 
 
 @pytest.fixture(scope="session")

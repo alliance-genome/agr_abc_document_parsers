@@ -174,9 +174,12 @@ def _emit_section(
     for table in section.tables:
         _emit_table(table, lines)
 
-    # Formulas (plain text, matching consensus pipeline format)
+    # Formulas
     for formula in section.formulas:
-        lines.append(formula.text)
+        if formula.label:
+            lines.append(f"{formula.label} {formula.text}")
+        else:
+            lines.append(formula.text)
         lines.append("")
 
     # Lists
@@ -475,6 +478,11 @@ def _format_ref_line(ref: Reference) -> str:
         parts.append(f"PMCID:{ref.pmcid}")
     for link in ref.ext_links:
         parts.append(link)
+    if ref.comment and not parts:
+        # Note-only reference (e.g., reference annotations).
+        parts.append(ref.comment)
+    elif ref.comment:
+        parts.append(ref.comment)
     return f"{ref.index}. " + " ".join(parts)
 
 
@@ -536,14 +544,46 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
         lines.append(f"## {sub.title}")
         lines.append("")
     if sub.authors:
-        author_parts = []
-        for author in sub.authors:
-            name = f"{author.given_name} {author.surname}".strip()
-            if name:
-                author_parts.append(name)
-        if author_parts:
-            lines.append(", ".join(author_parts))
-            lines.append("")
+        has_affiliations = any(a.affiliations for a in sub.authors)
+        if has_affiliations:
+            # Meeting-abstract style: one author per line with
+            # affiliation superscripts, followed by affiliation lines.
+            aff_list: list[str] = []
+            aff_index: dict[str, int] = {}
+            for author in sub.authors:
+                for aff in author.affiliations:
+                    if aff not in aff_index:
+                        aff_index[aff] = len(aff_list) + 1
+                        aff_list.append(aff)
+            for author in sub.authors:
+                name = f"{author.surname} {author.given_name}".strip()
+                if not name:
+                    continue
+                nums = " ".join(
+                    str(aff_index[a]) for a in author.affiliations
+                    if a in aff_index
+                )
+                if nums:
+                    name = f"{name} {nums}"
+                lines.append(name)
+            for idx, aff_text in enumerate(aff_list, 1):
+                lines.append(f"{idx} {aff_text}")
+        else:
+            # Simple style: comma-separated names on one line.
+            author_parts = []
+            for author in sub.authors:
+                name = (
+                    f"{author.given_name} {author.surname}".strip()
+                )
+                if name:
+                    author_parts.append(name)
+            if author_parts:
+                lines.append(", ".join(author_parts))
+        lines.append("")
+    if sub.author_notes:
+        for note in sub.author_notes:
+            lines.append(note)
+        lines.append("")
     footnote_counter = [0]
     _emit_sections(sub.sections, lines, base_level=3,
                    footnote_counter=footnote_counter)
