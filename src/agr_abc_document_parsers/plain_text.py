@@ -226,6 +226,8 @@ def extract_sentences(
 def _collect_figure_text(fig: Figure, parts: list[str]) -> None:
     """Collect plain text from a figure, including label, caption, and alt-text."""
     text_parts: list[str] = []
+    if fig.doi:
+        text_parts.append(fig.doi)
     if fig.label:
         text_parts.append(fig.label.rstrip(".:").strip())
     if fig.caption:

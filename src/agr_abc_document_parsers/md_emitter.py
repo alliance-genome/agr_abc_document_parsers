@@ -299,6 +299,9 @@ def _emit_list(lst: ListBlock, lines: list[str]) -> None:
 
 def _emit_figure(fig: Figure, lines: list[str]) -> None:
     """Emit a single figure caption and optional alt-text."""
+    if fig.doi:
+        lines.append(f"<!-- doi: {fig.doi} -->")
+        lines.append("")
     label = fig.label.rstrip(".:").strip()
     if label:
         if fig.caption:

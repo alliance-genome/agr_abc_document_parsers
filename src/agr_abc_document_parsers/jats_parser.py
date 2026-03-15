@@ -938,7 +938,7 @@ def _parse_body(root: etree._Element) -> list[Section]:
         elif tag == "p":
             _collect_from_p(child, preamble)
         elif tag == "fig":
-            preamble.figures.append(_parse_fig(child))
+            preamble.figures.extend(_parse_fig(child))
         elif tag == "table-wrap":
             preamble.tables.append(_parse_table_wrap(child))
         elif tag == "disp-formula":
@@ -1037,7 +1037,7 @@ def _dispatch_group_container(
     """Unpack group containers into their individual elements."""
     if tag == "fig-group":
         for fig_elem in child.findall("fig"):
-            section.figures.append(_parse_fig(fig_elem))
+            section.figures.extend(_parse_fig(fig_elem))
     elif tag == "table-wrap-group":
         for tw_elem in child.findall("table-wrap"):
             section.tables.append(_parse_table_wrap(tw_elem))
@@ -1084,7 +1084,7 @@ def _dispatch_sec_child(
     elif tag == "sec":
         section.subsections.append(_parse_sec(child, level + 1))
     elif tag == "fig":
-        section.figures.append(_parse_fig(child))
+        section.figures.extend(_parse_fig(child))
     elif tag == "table-wrap":
         section.tables.append(_parse_table_wrap(child))
     elif tag == "disp-formula":
@@ -1213,7 +1213,7 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
         if tag in _BLOCK_TAGS:
             _flush()
             if tag == "fig":
-                section.figures.append(_parse_fig(child))
+                section.figures.extend(_parse_fig(child))
             elif tag == "table-wrap":
                 section.tables.append(_parse_table_wrap(child))
             elif tag == "disp-formula":
@@ -1370,9 +1370,26 @@ def _parse_paragraph(
     return Paragraph(text=para_text, refs=refs, named_content=annotations)
 
 
-def _parse_fig(fig_elem: etree._Element) -> Figure:
-    """Parse a <fig> element."""
+def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
+    """Parse a <fig> element, including any nested child-fig elements.
+
+    Returns a list: [main_figure, *child_figures].
+    """
     fig = Figure()
+
+    # Extract figure-level DOI from <object-id pub-id-type="doi">
+    # (direct child of <fig>, or inside <media> for video figures)
+    for oid in fig_elem.findall("object-id"):
+        if oid.get("pub-id-type") == "doi" and oid.text:
+            fig.doi = oid.text.strip()
+            break
+    if not fig.doi:
+        media_elem = fig_elem.find("media")
+        if media_elem is not None:
+            for oid in media_elem.findall("object-id"):
+                if oid.get("pub-id-type") == "doi" and oid.text:
+                    fig.doi = oid.text.strip()
+                    break
 
     label_elem = fig_elem.find("label")
     if label_elem is not None:
@@ -1470,7 +1487,22 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
     # Direct <p> children of <fig> (not inside <caption> or <abstract>).
     # Some publishers put extra text like "Reagents and conditions: ..."
     # as bare <p> elements within <fig>, after the <graphic>.
+    child_figs: list[Figure] = []
     for p in fig_elem.findall("p"):
+        # Extract nested child-fig elements (e.g. eLife figure
+        # supplements) as separate Figure objects.
+        nested = p.findall("fig")
+        if nested:
+            for nf in nested:
+                child_figs.extend(_parse_fig(nf))
+            # Include any remaining text in <p> outside the <fig>
+            p_copy = deepcopy(p)
+            for nf in p_copy.findall("fig"):
+                p_copy.remove(nf)
+            remaining = _inline_text(p_copy).strip()
+            if remaining:
+                fig.caption_paragraphs.append(remaining)
+            continue
         # Skip <p> elements that contain only <fn> children (already
         # handled above) — check if all meaningful text is inside <fn>.
         fn_children = p.findall("fn")
@@ -1485,7 +1517,7 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
         if p_text:
             fig.caption_paragraphs.append(p_text)
 
-    return fig
+    return [fig] + child_figs
 
 
 def _parse_standalone_graphic(graphic_elem: etree._Element) -> Figure:
@@ -1953,7 +1985,7 @@ def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
             section.subsections.append(_parse_sec(child, level=2))
         elif tag in ("fig", "table-wrap", "disp-formula"):
             if tag == "fig":
-                section.figures.append(_parse_fig(child))
+                section.figures.extend(_parse_fig(child))
             elif tag == "table-wrap":
                 section.tables.append(_parse_table_wrap(child))
             else:
@@ -2102,7 +2134,7 @@ def _parse_single_app(app: etree._Element) -> Section:
     for tw in app.findall("table-wrap"):
         section.tables.append(_parse_table_wrap(tw))
     for fig in app.findall("fig"):
-        section.figures.append(_parse_fig(fig))
+        section.figures.extend(_parse_fig(fig))
     for supp in app.findall("supplementary-material"):
         _parse_supplementary(supp, section)
     for fn_grp in app.findall("fn-group"):
@@ -2339,7 +2371,7 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
         ) else ""
 
         if tag == "fig":
-            doc.figures.append(_parse_fig(child))
+            doc.figures.extend(_parse_fig(child))
         elif tag == "table-wrap":
             doc.tables.append(_parse_table_wrap(child))
         elif tag == "boxed-text":

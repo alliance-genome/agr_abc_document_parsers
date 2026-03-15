@@ -53,6 +53,7 @@ class Figure:
     alt_text: str = ""    # alternative text from <alt-text> / <graphic>
     attrib: str = ""      # attribution / source text from <attrib>
     graphic_url: str = ""  # image ref (preserved for downstream; not in Markdown)
+    doi: str = ""         # figure-level DOI (from <object-id pub-id-type="doi">)
 
 
 @dataclass

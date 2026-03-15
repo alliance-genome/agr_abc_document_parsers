@@ -38,6 +38,7 @@ _FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+)$")
 _CATEGORIES_RE = re.compile(r"^\*\*Categories:\*\*\s*(.+)$")
 _ROLE_FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+?):\s+(.+)$")
 _HR_RE = re.compile(r"^---\s*$")
+_FIG_DOI_RE = re.compile(r"^<!--\s*doi:\s*(.+?)\s*-->$")
 _ORDERED_LIST_RE = re.compile(r"^(\d+)\.\s+(.+)$")
 _REF_LINE_RE = re.compile(r"^(\d+)\.\s*(.*)$")
 _GFM_SEP_RE = re.compile(r"^\|[-:| ]+\|$")
@@ -862,6 +863,7 @@ def _parse_section_lines(
     last_table: Table | None = None
     capture_table_fns = False
     table_fn_collected = 0
+    pending_fig_doi = ""
 
     while i < n:
         line = content_lines[i]
@@ -871,6 +873,13 @@ def _parse_section_lines(
             if capture_table_fns and table_fn_collected > 0:
                 capture_table_fns = False
                 table_fn_collected = 0
+            i += 1
+            continue
+
+        # Figure DOI comment: <!-- doi: 10.xxx -->
+        m_doi = _FIG_DOI_RE.match(line)
+        if m_doi:
+            pending_fig_doi = m_doi.group(1)
             i += 1
             continue
 
@@ -915,8 +924,14 @@ def _parse_section_lines(
             caption = m_label.group(2) or ""
 
             if _TABLE_LABEL_RE.match(label):
-                # Table caption — attach to preceding table with rows
-                if last_table is not None and last_table.rows:
+                # Table caption — attach to preceding table with rows,
+                # but only if it doesn't already have a label (avoid
+                # overwriting when consecutive captions follow a table).
+                if (
+                    last_table is not None
+                    and last_table.rows
+                    and not last_table.label
+                ):
                     last_table.label = label
                     last_table.caption = caption
                     capture_table_fns = True
@@ -931,7 +946,11 @@ def _parse_section_lines(
                 continue
 
             if _FIGURE_LABEL_RE.match(label):
-                section.figures.append(Figure(label=label, caption=caption))
+                fig = Figure(
+                    label=label, caption=caption, doi=pending_fig_doi,
+                )
+                section.figures.append(fig)
+                pending_fig_doi = ""
                 last_table = None
                 capture_table_fns = False
                 table_fn_collected = 0
@@ -939,7 +958,11 @@ def _parse_section_lines(
                 continue
 
             # Other bold labels (e.g., Supplementary File) — treat as figure
-            section.figures.append(Figure(label=label, caption=caption))
+            fig = Figure(
+                label=label, caption=caption, doi=pending_fig_doi,
+            )
+            section.figures.append(fig)
+            pending_fig_doi = ""
             last_table = None
             capture_table_fns = False
             table_fn_collected = 0
