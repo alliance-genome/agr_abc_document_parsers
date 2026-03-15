@@ -95,8 +95,9 @@ testpaths = ["tests"]
 markers = [
     "webtest: tests that require network access to PMC (deselected by default)",
     "teitest: tests that require access to Alliance prod DB and S3 (deselected by default)",
+    "agrtest: tests that require Alliance DB/S3 + PMC network access (deselected by default)",
 ]
-addopts = "-m 'not webtest and not teitest'"
+addopts = "-m 'not webtest and not teitest and not agrtest'"
 
 [tool.coverage.run]
 source = ["src/agr_abc_document_parsers"]

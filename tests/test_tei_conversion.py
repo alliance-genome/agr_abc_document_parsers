@@ -13,9 +13,7 @@ Requires:
 from __future__ import annotations
 
 import difflib
-import gzip
 import json
-import os
 import re
 import unicodedata
 from pathlib import Path
@@ -26,65 +24,16 @@ import pytest
 from agr_abc_document_parsers.md_emitter import emit_markdown
 from agr_abc_document_parsers.plain_text import extract_plain_text
 from agr_abc_document_parsers.tei_parser import parse_tei
+from tests.agr_infra_helpers import download_from_agr_s3, get_db_config
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 _CACHE_DIR = Path(__file__).parent / ".teidata"
-_ENV_FILE = Path(__file__).parent.parent / ".env"
 
 # Minimum paragraph length for comparison (skip very short text)
 _MIN_PARA_LENGTH = 20
-
-
-# ---------------------------------------------------------------------------
-# Environment / credential helpers
-# ---------------------------------------------------------------------------
-
-
-def _load_env() -> dict[str, str]:
-    """Load environment variables from .env file."""
-    env: dict[str, str] = {}
-    if _ENV_FILE.exists():
-        try:
-            from dotenv import dotenv_values
-            env = {k: v for k, v in dotenv_values(_ENV_FILE).items() if v is not None}
-        except ImportError:
-            # Fallback: manual parsing
-            for line in _ENV_FILE.read_text().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, _, val = line.partition("=")
-                    env[key.strip()] = val.strip()
-    return env
-
-
-def _get_db_config() -> dict[str, str]:
-    """Get database connection config from environment / .env file."""
-    env = _load_env()
-    return {
-        "host": os.environ.get("PSQL_HOST", env.get("PSQL_HOST", "")),
-        "port": os.environ.get("PSQL_PORT", env.get("PSQL_PORT", "5432")),
-        "database": os.environ.get("PSQL_DATABASE", env.get("PSQL_DATABASE", "literature")),
-        "user": os.environ.get("PSQL_USERNAME", env.get("PSQL_USERNAME", "postgres")),
-        "password": os.environ.get("PSQL_PASSWORD", env.get("PSQL_PASSWORD", "")),
-    }
-
-
-def _get_s3_config() -> dict[str, str]:
-    """Get S3 configuration from environment / .env file."""
-    env = _load_env()
-    # Set AWS credentials in environment for boto3
-    for key in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
-        if key not in os.environ and key in env:
-            os.environ[key] = env[key]
-    return {
-        "bucket": os.environ.get("S3_BUCKET", env.get("S3_BUCKET", "agr-literature")),
-        "env_prefix": os.environ.get("S3_ENV_PREFIX", env.get("S3_ENV_PREFIX", "prod")),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +52,11 @@ def _fetch_tei_md5sums(limit: int = 50) -> list[dict[str, Any]]:
         pytest.skip("psycopg2 not installed")
         return []
 
-    db_config = _get_db_config()
+    db_config = get_db_config()
     if not db_config["host"]:
-        pytest.skip("PSQL_HOST not configured — set in .env or environment")
+        pytest.skip(
+            "PSQL_HOST not configured — set in .env or environment"
+        )
         return []
 
     query = """
@@ -135,53 +86,10 @@ def _fetch_tei_md5sums(limit: int = 50) -> list[dict[str, Any]]:
         return []
 
     return [
-        {"md5sum": row[0], "reference_id": row[1], "display_name": row[2]}
+        {"md5sum": row[0], "reference_id": row[1],
+         "display_name": row[2]}
         for row in rows
     ]
-
-
-# ---------------------------------------------------------------------------
-# S3 access
-# ---------------------------------------------------------------------------
-
-
-def _s3_key_from_md5sum(md5sum: str, env_prefix: str) -> str:
-    """Build the S3 object key from an md5sum.
-
-    Path pattern: {env}/reference/documents/{md5[0]}/{md5[1]}/{md5[2]}/{md5[3]}/{md5sum}.gz
-    """
-    folder = f"{env_prefix}/reference/documents/"
-    folder += "/".join(md5sum[0:4])
-    return f"{folder}/{md5sum}.gz"
-
-
-def _download_tei_from_s3(md5sum: str) -> bytes | None:
-    """Download and decompress a TEI file from S3.
-
-    Returns the raw TEI XML bytes, or None if not found.
-    """
-    try:
-        import boto3
-        from botocore.exceptions import ClientError
-    except ImportError:
-        return None
-
-    s3_config = _get_s3_config()
-    s3_key = _s3_key_from_md5sum(md5sum, s3_config["env_prefix"])
-
-    try:
-        client = boto3.client("s3")
-        response = client.get_object(Bucket=s3_config["bucket"], Key=s3_key)
-        compressed_data = response["Body"].read()
-    except ClientError:
-        return None
-
-    # Decompress gzip
-    try:
-        return gzip.decompress(compressed_data)
-    except (gzip.BadGzipFile, OSError):
-        # Might not be compressed
-        return compressed_data
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +111,7 @@ def _ensure_cached(md5sum: str, display_name: str) -> Path | None:
         return tei_path
 
     # Download from S3
-    tei_data = _download_tei_from_s3(md5sum)
+    tei_data = download_from_agr_s3(md5sum)
     if tei_data is None:
         return None
 

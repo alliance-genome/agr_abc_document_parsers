@@ -23,6 +23,10 @@ def pytest_addoption(parser):
         "--tei-count", type=int, default=20,
         help="Number of TEI files to test from prod DB (teitest only)",
     )
+    parser.addoption(
+        "--agr-count", type=int, default=100,
+        help="Number of Alliance nxml articles to test (agrtest only)",
+    )
 
 
 def get_ncbi_api_key(request):

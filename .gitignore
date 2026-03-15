@@ -27,6 +27,7 @@ htmlcov/
 .mypy_cache/
 tests/.pmcdata/
 tests/.teidata/
+tests/.agrdata/
 
 # Environment
 .env
