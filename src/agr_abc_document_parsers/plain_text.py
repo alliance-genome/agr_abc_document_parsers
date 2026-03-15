@@ -157,11 +157,27 @@ def extract_plain_text(
 
     if include_sub_articles:
         for sub in doc.sub_articles:
-            sub_text = extract_plain_text(
-                sub, include_supplements=False, include_sub_articles=False,
-            )
-            if sub_text:
-                parts.append(sub_text)
+            if sub.doi:
+                parts.append("DOI: " + sub.doi)
+            if sub.title:
+                parts.append(strip_markdown_formatting(sub.title))
+            # Author/editor lines for sub-articles
+            for author in sub.authors:
+                line = (
+                    f"{author.given_name} {author.surname}".strip()
+                )
+                if not line:
+                    continue
+                parts.append(line)
+            # Body and remaining content via recursive call
+            # (skip title since we already emitted it above)
+            sub_parts: list[str] = []
+            _collect_sections_text(sub.sections, sub_parts)
+            for fig in sub.figures:
+                _collect_figure_text(fig, sub_parts)
+            for p in sub_parts:
+                if p:
+                    parts.append(p)
 
     return "\n\n".join(p for p in parts if p)
 

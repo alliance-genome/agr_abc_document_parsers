@@ -257,10 +257,16 @@ def _split_sub_articles(
     i = refs_line
     while i < end:
         if _HR_RE.match(lines[i]):
-            # Look ahead for an H2 heading after optional blanks
+            # Look ahead for an H2 heading after optional blanks and
+            # an optional DOI line (e.g. "DOI: 10.7554/eLife.82952.sa0")
             j = i + 1
             while j < end and not lines[j].strip():
                 j += 1
+            # Skip a DOI metadata line if present
+            if j < end and lines[j].startswith("DOI: "):
+                j += 1
+                while j < end and not lines[j].strip():
+                    j += 1
             if j < end and _heading_level(lines[j]) == 2:
                 sub_starts.append(i)
         i += 1
@@ -291,6 +297,15 @@ def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
     if pos < n and _HR_RE.match(chunk_lines[pos]):
         pos += 1
     pos = _skip_blank(chunk_lines, pos, n)
+
+    # Optional DOI line before title (e.g. "DOI: 10.7554/eLife.82952.sa0")
+    if (
+        pos < n
+        and chunk_lines[pos].startswith("DOI: ")
+    ):
+        doc.doi = chunk_lines[pos][5:].strip()
+        pos += 1
+        pos = _skip_blank(chunk_lines, pos, n)
 
     # Title (H2)
     if pos < n and _heading_level(chunk_lines[pos]) == 2:

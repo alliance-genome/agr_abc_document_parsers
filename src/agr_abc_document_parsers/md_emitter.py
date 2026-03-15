@@ -540,12 +540,31 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
     """Emit a single sub-article with ``---`` separator and H2 title."""
     lines.append("---")
     lines.append("")
+    if sub.doi:
+        lines.append(f"DOI: {sub.doi}")
+        lines.append("")
     if sub.title:
         lines.append(f"## {sub.title}")
         lines.append("")
     if sub.authors:
+        has_roles = any(a.roles for a in sub.authors)
         has_affiliations = any(a.affiliations for a in sub.authors)
-        if has_affiliations:
+        if has_roles:
+            # Editor/reviewer style: one contributor per line with
+            # role and inline affiliation details.
+            for author in sub.authors:
+                parts = [
+                    f"{author.surname} {author.given_name}".strip()
+                ]
+                if not parts[0]:
+                    continue
+                for role in author.roles:
+                    parts.append(role)
+                for aff in author.affiliations:
+                    parts.append(aff)
+                lines.append(" ".join(parts))
+            lines.append("")
+        elif has_affiliations:
             # Meeting-abstract style: one author per line with
             # affiliation superscripts, followed by affiliation lines.
             aff_list: list[str] = []
@@ -568,6 +587,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
                 lines.append(name)
             for idx, aff_text in enumerate(aff_list, 1):
                 lines.append(f"{idx} {aff_text}")
+            lines.append("")
         else:
             # Simple style: comma-separated names on one line.
             author_parts = []
@@ -579,7 +599,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
                     author_parts.append(name)
             if author_parts:
                 lines.append(", ".join(author_parts))
-        lines.append("")
+            lines.append("")
     if sub.author_notes:
         for note in sub.author_notes:
             lines.append(note)

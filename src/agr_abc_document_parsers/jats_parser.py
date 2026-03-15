@@ -483,6 +483,41 @@ def _parse_secondary_abstracts(
     return results
 
 
+def _collect_inline_aff(
+    contrib: etree._Element, author: Author,
+) -> None:
+    """Collect inline ``<aff>`` data from within a ``<contrib>``.
+
+    eLife sub-articles embed affiliation details (institution-id,
+    institution, country) directly inside the contrib element rather
+    than using top-level ``<aff>`` with xref linking.  This helper
+    extracts those pieces and appends a single affiliation string.
+    """
+    for aff_el in contrib.findall("aff"):
+        parts: list[str] = []
+        # institution-wrap may contain institution-id and institution
+        for iw in aff_el.findall(".//institution-id"):
+            iw_text = (iw.text or "").strip()
+            if iw_text:
+                parts.append(iw_text)
+        for inst in aff_el.findall(".//institution"):
+            inst_text = (inst.text or "").strip()
+            if inst_text:
+                parts.append(inst_text)
+        for country in aff_el.findall(".//country"):
+            c_text = (country.text or "").strip()
+            if c_text:
+                parts.append(c_text)
+        if not parts:
+            # Fallback: use all text from the aff element
+            fallback = all_text(aff_el)
+            if fallback:
+                parts.append(fallback)
+        aff_text = " ".join(parts)
+        if aff_text and aff_text not in author.affiliations:
+            author.affiliations.append(aff_text)
+
+
 def _parse_sub_articles(root: etree._Element) -> list[Document]:
     """Parse ``<sub-article>`` elements into Document objects."""
     results: list[Document] = []
@@ -502,6 +537,11 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
     if front_stub is None:
         front_stub = sub_el.find("front/article-meta")
     if front_stub is not None:
+        # DOI from front-stub
+        doi_el = front_stub.find("article-id[@pub-id-type='doi']")
+        if doi_el is not None and doi_el.text:
+            doc.doi = doi_el.text.strip()
+
         title_el = front_stub.find("title-group/article-title")
         if title_el is not None:
             doc.title = _inline_text(title_el).strip()
@@ -541,6 +581,8 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
                 rid = xref.get("rid", "")
                 if rid and rid in aff_map:
                     author.affiliations.append(aff_map[rid])
+            # Inline affiliations within the contrib element
+            _collect_inline_aff(contrib, author)
             for role_el in contrib.findall("role"):
                 role_text = all_text(role_el)
                 if role_text:
@@ -561,6 +603,12 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
                     rid = xref.get("rid", "")
                     if rid and rid in aff_map:
                         author.affiliations.append(aff_map[rid])
+                # Inline affiliations within the contrib element
+                _collect_inline_aff(contrib, author)
+                for role_el in contrib.findall("role"):
+                    role_text = all_text(role_el)
+                    if role_text:
+                        author.roles.append(role_text)
                 doc.authors.append(author)
 
         # Corresponding author notes
