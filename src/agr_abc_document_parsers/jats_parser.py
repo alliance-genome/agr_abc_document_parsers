@@ -1664,17 +1664,20 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
 
     # Table footnotes from <table-wrap-foot>
     # Some articles have multiple <table-wrap-foot> elements per table.
-    # Some use <fn> elements, others use bare <p> elements.
+    # A foot may contain <fn> elements, bare <p> elements, or both.
+    # Process all direct children in document order to capture everything.
     for foot in tw_elem.findall("table-wrap-foot"):
-        fn_elems = foot.findall(".//fn")
-        if fn_elems:
-            for fn in fn_elems:
-                fn_text = all_text(fn)
+        for child in foot:
+            child_tag = (
+                etree.QName(child.tag).localname
+                if isinstance(child.tag, str) else ""
+            )
+            if child_tag == "fn":
+                fn_text = all_text(child)
                 if fn_text:
                     table.foot_notes.append(fn_text)
-        else:
-            for p in foot.findall("p"):
-                p_text = all_text(p)
+            elif child_tag == "p":
+                p_text = all_text(child)
                 if p_text:
                     table.foot_notes.append(p_text)
 
@@ -2355,13 +2358,15 @@ def _parse_back_sections(
 
 
 def _parse_floats_group(root: etree._Element, doc: Document) -> None:
-    """Parse <floats-group> for figures and tables outside body/back.
+    """Parse <floats-group> / <floats-wrap> for figures/tables outside body.
 
     In many PMC nXML files, figures and tables are placed in a
-    <floats-group> element that is a direct child of <article>,
-    separate from <body> and <back>.
+    <floats-group> or <floats-wrap> element that is a direct child
+    of <article>, separate from <body> and <back>.
     """
     floats = root.find(".//floats-group")
+    if floats is None:
+        floats = root.find(".//floats-wrap")
     if floats is None:
         return
 
