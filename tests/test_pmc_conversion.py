@@ -442,6 +442,40 @@ def _detect_reference_start(paragraphs: list[str]) -> int | None:
         if pmid_count >= 3 or doi_count >= 3:
             return len(paragraphs) - 1
 
+    # Strategy 3: "References" heading followed by citation-like content
+    # (handles single-reference articles like corrigenda)
+    _REF_HEADING_RE = re.compile(
+        r"^(?:References?|Bibliography|Literature Cited|Works Cited)$",
+        re.IGNORECASE,
+    )
+    for i, para in enumerate(paragraphs):
+        if _REF_HEADING_RE.match(para.strip()):
+            # Check if any subsequent paragraph looks like a citation
+            for j in range(i + 1, len(paragraphs)):
+                subsequent = paragraphs[j]
+                has_year = bool(_YEAR_PATTERN.search(subsequent))
+                has_pmid = bool(_PMID_PATTERN.search(subsequent))
+                has_doi = bool(_DOI_PATTERN.search(subsequent))
+                if has_year or has_pmid or has_doi:
+                    return i
+            break
+
+    # Strategy 4: numbered reference list at end (e.g. "1. Author ... PMID DOI")
+    _NUMBERED_REF_RE = re.compile(r"^1\.\s+[A-Z]")
+    _BARE_YEAR_RE = re.compile(r"[,. ]\d{4}[.;,)\s]")
+    for i in range(len(paragraphs) - 1, -1, -1):
+        para = paragraphs[i]
+        if _NUMBERED_REF_RE.match(para.strip()):
+            has_pmid = bool(_PMID_PATTERN.search(para))
+            has_doi = bool(_DOI_PATTERN.search(para))
+            has_year = bool(_YEAR_PATTERN.search(para))
+            has_bare_year = bool(_BARE_YEAR_RE.search(para))
+            if has_pmid or has_doi or has_year or has_bare_year:
+                return i
+        # Stop scanning backwards if we hit a substantive body paragraph
+        elif len(para) > 100:
+            break
+
     return None
 
 
@@ -665,8 +699,8 @@ def _classify_pmc_paragraph(para: str) -> str:
     if _AUTHOR_BIO_PATTERN.match(stripped):
         return "author_info"
 
-    # Figure/table captions
-    if re.match(r"^Figure \d+", stripped) or re.match(r"^Table \d+", stripped):
+    # Figure/table captions (including supplementary labels like "S1 Table")
+    if re.match(r"^(?:Figure|Table|Supplementary|S\d+)\s+\d*", stripped):
         return "figure_caption"
 
     # Short headings (typically section titles)
@@ -900,9 +934,15 @@ def pytest_generate_tests(metafunc):
             except Exception:
                 pass
 
-        # Deduplicate, fixed first
+        # Start with fixed, then add all cached, then random (deduplicated)
         seen = set(fixed)
         all_ids = list(fixed)
+        # Include all cached articles for regression coverage
+        if _CACHE_DIR.exists():
+            for d in sorted(_CACHE_DIR.iterdir()):
+                if d.is_dir() and d.name.isdigit() and d.name not in seen:
+                    seen.add(d.name)
+                    all_ids.append(d.name)
         for pid in random_ids:
             if pid not in seen:
                 seen.add(pid)

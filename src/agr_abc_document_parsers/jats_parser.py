@@ -832,6 +832,11 @@ def _dispatch_sec_block(
         if p_elems:
             lines = [f"> {all_text(p)}" for p in p_elems
                      if all_text(p)]
+            # Include <attrib> elements (quote attributions)
+            for attrib in child.findall("attrib"):
+                attrib_text = all_text(attrib)
+                if attrib_text:
+                    lines.append(f"> {attrib_text}")
             if lines:
                 section.paragraphs.append(
                     Paragraph(text="\n".join(lines))
@@ -1197,6 +1202,27 @@ def _parse_fig(fig_elem: etree._Element) -> Figure:
             fig.caption = p_parts[0]
             fig.caption_paragraphs = p_parts[1:]
 
+    # Some articles use <abstract abstract-type="fig_caption"> for a
+    # translated caption (e.g. English translation of a Chinese caption).
+    for abs_elem in fig_elem.findall("abstract"):
+        if abs_elem.get("abstract-type") == "fig_caption":
+            parts: list[str] = []
+            title_el = abs_elem.find("title")
+            if title_el is not None:
+                parts.append(_inline_text(title_el).strip())
+            parts.extend(
+                _inline_text(p).strip()
+                for p in abs_elem.findall("p") if _inline_text(p).strip()
+            )
+            if parts:
+                if fig.caption:
+                    fig.caption = f"{fig.caption}\n{parts[0]}"
+                    fig.caption_paragraphs.extend(parts[1:])
+                else:
+                    fig.caption = parts[0]
+                    fig.caption_paragraphs = parts[1:]
+            break
+
     # Alt-text: may appear as direct child of <fig> or inside <graphic>
     alt_elem = fig_elem.find("alt-text")
     if alt_elem is None:
@@ -1331,6 +1357,26 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         for p in caption_elem.findall("p"):
             parts.append(_inline_text(p).strip())
         table.caption = " ".join(p for p in parts if p)
+
+    # Some articles use <abstract abstract-type="table_caption"> for a
+    # translated caption (e.g. English translation of a Chinese caption).
+    for abs_elem in tw_elem.findall("abstract"):
+        if abs_elem.get("abstract-type") == "table_caption":
+            tparts: list[str] = []
+            title_el = abs_elem.find("title")
+            if title_el is not None:
+                tparts.append(_inline_text(title_el).strip())
+            tparts.extend(
+                _inline_text(p).strip()
+                for p in abs_elem.findall("p") if _inline_text(p).strip()
+            )
+            if tparts:
+                translated = " ".join(tparts)
+                if table.caption:
+                    table.caption = f"{table.caption}\n{translated}"
+                else:
+                    table.caption = translated
+            break
 
     table_elem = tw_elem.find("table")
     if table_elem is None:
@@ -1714,6 +1760,15 @@ def _parse_glossary(
                 )
     for dl in elem.findall("def-list"):
         _parse_def_list(dl, section)
+    for arr in elem.findall("array"):
+        # <array> with <tbody>/<tr>/<td> rows — used for abbreviation tables
+        items: list[str] = []
+        for tr in arr.findall(".//tr"):
+            cells = [all_text(td) for td in tr.findall("td") if all_text(td)]
+            if cells:
+                items.append("\t".join(cells))
+        if items:
+            section.paragraphs.append(Paragraph(text="\n".join(items)))
     for p in elem.findall("p"):
         p_text = all_text(p)
         if p_text:
