@@ -193,9 +193,15 @@ def _emit_section(
     if section.notes:
         lines.append("")
 
-    # Subsections
+    # Subsections — when the parent section has no heading, emit
+    # subsections at the same level so they don't become orphan
+    # headings that the Markdown reader cannot reconstruct.
+    sub_level = (
+        heading_level if not section.heading
+        else heading_level + 1
+    )
     for sub in section.subsections:
-        _emit_section(sub, lines, heading_level + 1, footnote_counter)
+        _emit_section(sub, lines, sub_level, footnote_counter)
 
 
 def _escape_cell(cell_text: str) -> str:

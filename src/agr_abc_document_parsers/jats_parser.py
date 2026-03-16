@@ -403,26 +403,49 @@ def _parse_abstract_content(
     """
     paragraphs: list[Paragraph] = []
 
+    def _collect_list(list_elem: etree._Element) -> None:
+        """Collect paragraphs from a ``<list>`` inside an abstract."""
+        for item in list_elem.findall("list-item"):
+            for p in item.findall("p"):
+                para = _parse_paragraph(p)
+                if para.text:
+                    paragraphs.append(para)
+
     def _collect_sec(sec_elem: etree._Element) -> None:
         """Recursively collect paragraphs from a ``<sec>``."""
         title_elem = sec_elem.find("title")
         sec_title = (all_text(title_elem)
                      if title_elem is not None else "")
-        has_direct_p = False
+        has_direct_content = False
         for child in sec_elem:
             ctag = (etree.QName(child.tag).localname
                     if isinstance(child.tag, str) else "")
             if ctag == "p":
-                has_direct_p = True
+                has_direct_content = True
                 para = _parse_paragraph(child)
                 if para.text and sec_title:
                     para.text = f"**{sec_title}:** {para.text}"
                     sec_title = ""  # only prepend to first
                 if para.text:
                     paragraphs.append(para)
+            elif ctag == "list":
+                has_direct_content = True
+                # Prepend section title to first list item if present
+                first_item = True
+                for item in child.findall("list-item"):
+                    for p in item.findall("p"):
+                        para = _parse_paragraph(p)
+                        if para.text and sec_title and first_item:
+                            para.text = (
+                                f"**{sec_title}:** {para.text}"
+                            )
+                            sec_title = ""
+                            first_item = False
+                        if para.text:
+                            paragraphs.append(para)
             elif ctag == "sec":
                 _collect_sec(child)
-        if not has_direct_p and sec_title:
+        if not has_direct_content and sec_title:
             # Empty sec with title only (skip)
             pass
 
@@ -435,6 +458,8 @@ def _parse_abstract_content(
             para = _parse_paragraph(child)
             if para.text:
                 paragraphs.append(para)
+        elif tag == "list":
+            _collect_list(child)
 
     return paragraphs
 
@@ -1065,8 +1090,63 @@ def _dispatch_group_container(
 ) -> None:
     """Unpack group containers into their individual elements."""
     if tag == "fig-group":
+        # Capture group-level label/caption for propagation
+        # to child figures that lack their own.
+        grp_label_elem = child.find("label")
+        grp_label = (all_text(grp_label_elem).strip()
+                     if grp_label_elem is not None else "")
+        grp_cap_elem = child.find("caption")
+        grp_caption = ""
+        grp_cap_paragraphs: list[str] = []
+        if grp_cap_elem is not None:
+            cap_title = grp_cap_elem.find("title")
+            if cap_title is not None:
+                grp_caption = _inline_text(cap_title).strip()
+            cap_ps = [
+                _inline_text(p).strip()
+                for p in grp_cap_elem.findall("p")
+                if _inline_text(p).strip()
+            ]
+            if grp_caption and cap_ps:
+                grp_cap_paragraphs = cap_ps
+            elif cap_ps and not grp_caption:
+                grp_caption = cap_ps[0]
+                grp_cap_paragraphs = cap_ps[1:]
+
+        child_figs: list[Figure] = []
         for fig_elem in child.findall("fig"):
-            section.figures.extend(_parse_fig(fig_elem))
+            child_figs.extend(_parse_fig(fig_elem))
+
+        if child_figs:
+            # Propagate group label/caption to the first child
+            # figure when it lacks its own.
+            first = child_figs[0]
+            if grp_label and not first.label:
+                first.label = grp_label
+            if grp_caption and not first.caption:
+                first.caption = grp_caption
+                if grp_cap_paragraphs:
+                    first.caption_paragraphs = (
+                        grp_cap_paragraphs
+                        + first.caption_paragraphs
+                    )
+            elif grp_caption and first.caption:
+                # Both have captions — combine
+                first.caption_paragraphs = (
+                    [grp_caption] + grp_cap_paragraphs
+                    + first.caption_paragraphs
+                )
+            if grp_label and not first.label:
+                first.label = grp_label
+        elif grp_label or grp_caption:
+            # No child figs — create a standalone figure from
+            # the group-level metadata.
+            fig = Figure()
+            fig.label = grp_label
+            fig.caption = grp_caption
+            fig.caption_paragraphs = grp_cap_paragraphs
+            child_figs = [fig]
+        section.figures.extend(child_figs)
     elif tag == "table-wrap-group":
         # Capture group-level label/caption for propagation
         group_label_elem = child.find("label")
@@ -1452,11 +1532,34 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
         title = caption_elem.find("title")
         if title is not None:
             fig.caption = _inline_text(title).strip()
-        p_parts = [
-            _inline_text(p).strip()
-            for p in caption_elem.findall("p")
-            if _inline_text(p).strip()
-        ]
+        p_parts: list[str] = []
+        for p in caption_elem.findall("p"):
+            # When a <p> wraps a <list>, extract each list-item
+            # as a separate caption paragraph so they match the
+            # PMC text paragraph boundaries.
+            list_elem = p.find("list")
+            if list_elem is not None:
+                for li in list_elem.findall("list-item"):
+                    li_p = li.find("p")
+                    if li_p is not None:
+                        li_text = _inline_text(li_p).strip()
+                        if li_text:
+                            p_parts.append(li_text)
+                    else:
+                        li_text = all_text(li).strip()
+                        if li_text:
+                            p_parts.append(li_text)
+                # Capture text after the list (tail + siblings)
+                p_copy = deepcopy(p)
+                for lst in p_copy.findall("list"):
+                    p_copy.remove(lst)
+                trailing = _inline_text(p_copy).strip()
+                if trailing:
+                    p_parts.append(trailing)
+            else:
+                p_text = _inline_text(p).strip()
+                if p_text:
+                    p_parts.append(p_text)
         if fig.caption and p_parts:
             # Title goes in caption, body <p>s in caption_paragraphs
             fig.caption_paragraphs = p_parts
@@ -2024,7 +2127,7 @@ def _p_text_skip_blocks(p_elem: etree._Element) -> str:
 
 
 def _parse_supplementary(elem: etree._Element, section: Section) -> None:
-    """Parse <supplementary-material> into a paragraph."""
+    """Parse <supplementary-material> into paragraphs and tables."""
     label_elem = elem.find("label")
     label = all_text(label_elem)
     caption = elem.find("caption")
@@ -2046,6 +2149,10 @@ def _parse_supplementary(elem: etree._Element, section: Section) -> None:
         section.paragraphs.append(Paragraph(text=f"**{label}.**"))
     elif caption_text:
         section.paragraphs.append(Paragraph(text=caption_text))
+
+    # Extract inline table-wrap elements within supplementary material
+    for tw in elem.findall("table-wrap"):
+        section.tables.append(_parse_table_wrap(tw))
 
 
 def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
@@ -2480,8 +2587,24 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
 
         if tag == "fig":
             doc.figures.extend(_parse_fig(child))
+        elif tag == "fig-group":
+            # Use _dispatch_group_container logic to handle
+            # group-level label/caption propagation.
+            dummy_sec = Section(level=1)
+            _dispatch_group_container(
+                child, tag, dummy_sec, 1,
+            )
+            doc.figures.extend(dummy_sec.figures)
         elif tag == "table-wrap":
             doc.tables.append(_parse_table_wrap(child))
+        elif tag == "table-wrap-group":
+            # Use _dispatch_group_container logic to handle
+            # group-level label/caption propagation.
+            dummy_sec = Section(level=1)
+            _dispatch_group_container(
+                child, tag, dummy_sec, 1,
+            )
+            doc.tables.extend(dummy_sec.tables)
         elif tag == "boxed-text":
             section = Section(level=1)
             # Use boxed-text title/caption as section heading so
