@@ -81,6 +81,7 @@ class Formula:
 class ListBlock:
     items: list[str] = field(default_factory=list)
     ordered: bool = False
+    title: str = ""
 
 
 @dataclass

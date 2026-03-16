@@ -1484,6 +1484,34 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
             else:
                 fig.caption = ab_text
 
+    # Direct <list> children of <fig> (not inside <caption>).
+    # Some publishers put list items directly under <fig>.
+    for list_elem in fig_elem.findall("list"):
+        for item_elem in list_elem.findall("list-item"):
+            item_text = all_text(item_elem).strip()
+            if item_text:
+                fig.caption_paragraphs.append(item_text)
+
+    # Direct <table-wrap> children of <fig>.
+    # Some publishers embed tables directly within a figure element.
+    for tw in fig_elem.findall("table-wrap"):
+        tw_table = _parse_table_wrap(tw)
+        # Emit table label/caption as caption paragraph text
+        tw_parts: list[str] = []
+        if tw_table.label:
+            tw_parts.append(tw_table.label)
+        if tw_table.caption:
+            tw_parts.append(tw_table.caption)
+        if tw_parts:
+            fig.caption_paragraphs.append(" ".join(tw_parts))
+        for row in tw_table.rows:
+            cells = [c.text.strip() for c in row if c.text.strip()]
+            if cells:
+                fig.caption_paragraphs.append(" ".join(cells))
+        for fn in tw_table.foot_notes:
+            if fn.strip():
+                fig.caption_paragraphs.append(fn.strip())
+
     # Direct <p> children of <fig> (not inside <caption> or <abstract>).
     # Some publishers put extra text like "Reagents and conditions: ..."
     # as bare <p> elements within <fig>, after the <graphic>.
@@ -1881,6 +1909,12 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
     list_type = list_elem.get("list-type", "")
     ordered = list_type in ("order", "ordered", "number")
 
+    # Extract optional <title> child
+    list_title = ""
+    title_elem = list_elem.find("title")
+    if title_elem is not None:
+        list_title = all_text(title_elem).strip()
+
     items: list[str] = []
     for item_elem in list_elem.findall("list-item"):
         # Prepend explicit <label> if present (e.g., "1.", "a)")
@@ -1901,7 +1935,7 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
             nested_block = _parse_list(nested)
             items.extend(nested_block.items)
 
-    return ListBlock(items=items, ordered=ordered)
+    return ListBlock(items=items, ordered=ordered, title=list_title)
 
 
 def _p_text_skip_blocks(p_elem: etree._Element) -> str:
@@ -2138,6 +2172,10 @@ def _parse_single_app(app: etree._Element) -> Section:
         section.tables.append(_parse_table_wrap(tw))
     for fig in app.findall("fig"):
         section.figures.extend(_parse_fig(fig))
+    for list_elem in app.findall("list"):
+        section.lists.append(_parse_list(list_elem))
+    for boxed in app.findall("boxed-text"):
+        _parse_boxed_text(boxed, section)
     for supp in app.findall("supplementary-material"):
         _parse_supplementary(supp, section)
     for fn_grp in app.findall("fn-group"):

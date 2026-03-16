@@ -112,6 +112,9 @@ def extract_plain_text(
     for fig in doc.figures:
         _collect_figure_text(fig, parts)
 
+    for table in doc.tables:
+        _collect_table_text(table, parts)
+
     if doc.acknowledgments:
         parts.append("Acknowledgments")
         parts.append(strip_markdown_formatting(doc.acknowledgments))
@@ -282,6 +285,8 @@ def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
                 parts.append(strip_markdown_formatting(formula.text))
 
         for lst in section.lists:
+            if lst.title:
+                parts.append(strip_markdown_formatting(lst.title))
             for item in lst.items:
                 parts.append(strip_markdown_formatting(item))
 

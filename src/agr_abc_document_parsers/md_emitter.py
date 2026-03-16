@@ -289,6 +289,9 @@ def _emit_table(table: Table, lines: list[str]) -> None:
 
 
 def _emit_list(lst: ListBlock, lines: list[str]) -> None:
+    if lst.title:
+        lines.append(lst.title)
+        lines.append("")
     for i, item in enumerate(lst.items, 1):
         if lst.ordered:
             lines.append(f"{i}. {item}")
