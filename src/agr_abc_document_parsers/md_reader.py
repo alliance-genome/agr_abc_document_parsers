@@ -157,7 +157,7 @@ def read_markdown(text: str) -> Document:
 
     found_ack = False
     found_ref = False
-    for heading, content_lines in h2_blocks:
+    for heading, content_lines, is_boxed in h2_blocks:
         if heading == "Abstract":
             doc.abstract, kw = _parse_abstract_lines(content_lines)
             if kw and not doc.keywords:
@@ -195,17 +195,17 @@ def read_markdown(text: str) -> Document:
                 doc.references = refs
                 found_ref = True
             elif found_ack:
-                doc.back_matter.append(
-                    _parse_section_lines(heading, content_lines, 2)
-                )
+                sec = _parse_section_lines(heading, content_lines, 2)
+                sec.is_boxed = is_boxed
+                doc.back_matter.append(sec)
         elif found_ack and not found_ref:
-            doc.back_matter.append(
-                _parse_section_lines(heading, content_lines, 2)
-            )
+            sec = _parse_section_lines(heading, content_lines, 2)
+            sec.is_boxed = is_boxed
+            doc.back_matter.append(sec)
         else:
-            doc.sections.append(
-                _parse_section_lines(heading, content_lines, 2)
-            )
+            sec = _parse_section_lines(heading, content_lines, 2)
+            sec.is_boxed = is_boxed
+            doc.sections.append(sec)
 
     # --- Role footnotes (after references, before sub-articles) ---
     _parse_role_footnotes(main_lines, pos, main_n, doc)
@@ -526,18 +526,60 @@ def _parse_keywords(line: str) -> list[str]:
 
 def _collect_h2_blocks(
     lines: list[str], start: int, end: int,
-) -> list[tuple[str, list[str]]]:
-    """Collect H2 sections as (heading_text, content_lines) tuples."""
-    blocks: list[tuple[str, list[str]]] = []
+) -> list[tuple[str, list[str], bool]]:
+    """Collect H2 sections as (heading_text, content_lines, is_boxed).
+
+    Recognises ``::: boxed-text`` fences that wrap an H2 section (at the
+    top level, between other H2 blocks) and returns them with
+    ``is_boxed=True``.  Fences that appear *inside* an H2 block are kept
+    as part of that block's content and handled by
+    ``_parse_section_lines``.
+    """
+    blocks: list[tuple[str, list[str], bool]] = []
     pos = start
     while pos < end:
-        if _heading_level(lines[pos]) == 2:
+        # Top-level fenced container wrapping an H2
+        if lines[pos].strip().startswith("::: boxed-text"):
+            pos += 1
+            # Collect lines until closing :::
+            fence_lines: list[str] = []
+            while pos < end and not lines[pos].strip().startswith(":::"):
+                fence_lines.append(lines[pos])
+                pos += 1
+            if pos < end:
+                pos += 1  # skip closing :::
+            # Find the H2 inside the fence
+            for fi, fl in enumerate(fence_lines):
+                if _heading_level(fl) == 2:
+                    heading = _heading_text(fl)
+                    content = fence_lines[fi + 1:]
+                    blocks.append((heading, content, True))
+                    break
+            else:
+                # No H2 inside fence — treat as body content
+                if fence_lines:
+                    blocks.append(("", fence_lines, True))
+        elif _heading_level(lines[pos]) == 2:
             heading = _heading_text(lines[pos])
             pos += 1
             content_start = pos
-            while pos < end and _heading_level(lines[pos]) != 2:
+            while pos < end:
+                # Skip over ::: fenced regions so that H2
+                # headings inside them don't break the block.
+                if lines[pos].strip().startswith("::: "):
+                    pos += 1
+                    while (
+                        pos < end
+                        and not lines[pos].strip().startswith(":::")
+                    ):
+                        pos += 1
+                    if pos < end:
+                        pos += 1  # skip closing :::
+                    continue
+                if _heading_level(lines[pos]) == 2:
+                    break
                 pos += 1
-            blocks.append((heading, lines[content_start:pos]))
+            blocks.append((heading, lines[content_start:pos], False))
         else:
             pos += 1
     return blocks
@@ -875,6 +917,35 @@ def _parse_section_lines(
                 capture_table_fns = False
                 table_fn_collected = 0
             i += 1
+            continue
+
+        # Fenced container: ::: boxed-text ... :::
+        if line.strip().startswith("::: boxed-text"):
+            i += 1
+            box_lines: list[str] = []
+            while i < n and not content_lines[i].strip().startswith(":::"):
+                box_lines.append(content_lines[i])
+                i += 1
+            if i < n:
+                i += 1  # skip closing :::
+            # Extract heading from fenced content if present
+            box_heading = ""
+            box_content: list[str] = box_lines
+            for bi, bl in enumerate(box_lines):
+                hl = _heading_level(bl)
+                if hl > 0:
+                    box_heading = _heading_text(bl)
+                    box_content = box_lines[bi + 1:]
+                    break
+            box_section = _parse_section_lines(
+                box_heading, box_content,
+                heading_level + 1,
+            )
+            box_section.is_boxed = True
+            section.subsections.append(box_section)
+            last_table = None
+            capture_table_fns = False
+            table_fn_collected = 0
             continue
 
         # Figure DOI comment: <!-- doi: 10.xxx -->

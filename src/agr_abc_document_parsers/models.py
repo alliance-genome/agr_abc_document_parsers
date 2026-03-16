@@ -109,6 +109,7 @@ class Section:
     lists: list[ListBlock] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     subsections: list[Section] = field(default_factory=list)
+    is_boxed: bool = False            # True when from <boxed-text>
 
 
 @dataclass

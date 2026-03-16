@@ -1032,7 +1032,30 @@ def _dispatch_sec_block(
     if tag == "supplementary-material":
         _parse_supplementary(child, section)
     elif tag == "boxed-text":
-        _parse_boxed_text(child, section)
+        box_sec = Section(level=section.level + 1, is_boxed=True)
+        # Use boxed-text title/label/caption as heading
+        for t_tag in ("title", "label", "caption/title"):
+            t_elem = child.find(t_tag)
+            if t_elem is not None:
+                t_text = all_text(t_elem).strip()
+                if t_text:
+                    box_sec.heading = t_text
+                    break
+        _parse_boxed_text(child, box_sec)
+        # Remove duplicate bold title added by _parse_boxed_text
+        if box_sec.heading and box_sec.paragraphs:
+            bold_title = f"**{box_sec.heading}**"
+            box_sec.paragraphs = [
+                p for p in box_sec.paragraphs
+                if p.text != bold_title
+            ]
+        if (
+            box_sec.paragraphs or box_sec.subsections
+            or box_sec.lists or box_sec.figures
+            or box_sec.tables or box_sec.formulas
+            or box_sec.notes
+        ):
+            section.subsections.append(box_sec)
     elif tag == "disp-quote":
         p_elems = child.findall("p")
         if p_elems:
@@ -2606,7 +2629,7 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             )
             doc.tables.extend(dummy_sec.tables)
         elif tag == "boxed-text":
-            section = Section(level=1)
+            section = Section(level=1, is_boxed=True)
             # Use boxed-text title/caption as section heading so
             # it survives markdown roundtrip as a headed section.
             for t_tag in ("title", "label", "caption/title"):

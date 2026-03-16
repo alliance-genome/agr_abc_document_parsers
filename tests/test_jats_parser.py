@@ -2212,7 +2212,7 @@ class TestRefEditionComment:
 
 class TestBoxedText:
     def test_boxed_text_with_title(self):
-        """<boxed-text> with title renders title as bold + content."""
+        """<boxed-text> with title creates a boxed subsection."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -2224,12 +2224,15 @@ class TestBoxedText:
         </sec></body></article>"""
         doc = parse_jats(xml)
         sec = doc.sections[0]
-        all_text_parts = [p.text for p in sec.paragraphs]
-        assert any("Key Finding" in t for t in all_text_parts)
+        assert len(sec.subsections) == 1
+        box = sec.subsections[0]
+        assert box.is_boxed is True
+        assert box.heading == "Box 1: Key Finding"
+        all_text_parts = [p.text for p in box.paragraphs]
         assert any("Important discovery" in t for t in all_text_parts)
 
     def test_boxed_text_with_label(self):
-        """<boxed-text> with label instead of title."""
+        """<boxed-text> with label creates a boxed subsection."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -2241,12 +2244,15 @@ class TestBoxedText:
         </sec></body></article>"""
         doc = parse_jats(xml)
         sec = doc.sections[0]
-        all_text_parts = [p.text for p in sec.paragraphs]
-        assert any("Protocol 1" in t for t in all_text_parts)
+        assert len(sec.subsections) == 1
+        box = sec.subsections[0]
+        assert box.is_boxed is True
+        assert box.heading == "Protocol 1"
+        all_text_parts = [p.text for p in box.paragraphs]
         assert any("Steps for the experiment" in t for t in all_text_parts)
 
     def test_boxed_text_no_title(self):
-        """<boxed-text> without title still extracts content."""
+        """<boxed-text> without title creates a boxed subsection."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -2257,7 +2263,10 @@ class TestBoxedText:
         </sec></body></article>"""
         doc = parse_jats(xml)
         sec = doc.sections[0]
-        all_text_parts = [p.text for p in sec.paragraphs]
+        assert len(sec.subsections) == 1
+        box = sec.subsections[0]
+        assert box.is_boxed is True
+        all_text_parts = [p.text for p in box.paragraphs]
         assert any("Stand-alone boxed content" in t for t in all_text_parts)
 
 
@@ -3649,18 +3658,21 @@ class TestPreambleFlushSubsections:
           </sec>
         </body></article>"""
         doc = parse_jats(xml)
-        # Preamble section should be flushed with subsections
+        # Preamble section should be flushed with boxed subsection
         assert len(doc.sections) >= 2
         preamble = doc.sections[0]
-        assert len(preamble.subsections) == 2
-        assert preamble.subsections[0].heading == "Key findings"
-        assert preamble.subsections[1].heading == "What is new"
+        assert len(preamble.subsections) == 1
+        box = preamble.subsections[0]
+        assert box.is_boxed is True
+        assert len(box.subsections) == 2
+        assert box.subsections[0].heading == "Key findings"
+        assert box.subsections[1].heading == "What is new"
         # Body section follows
         intro = doc.sections[1]
         assert intro.heading == "Introduction"
 
     def test_boxed_text_caption_title(self):
-        """<boxed-text> with <caption><title> structure."""
+        """<boxed-text> with <caption><title> creates headed boxed subsection."""
         xml = b"""<article><body>
           <boxed-text position="float">
             <caption><title>Highlight box</title></caption>
@@ -3672,12 +3684,14 @@ class TestPreambleFlushSubsections:
         </body></article>"""
         doc = parse_jats(xml)
         preamble = doc.sections[0]
-        # Caption title emitted as bold paragraph
-        assert any("Highlight box" in p.text for p in preamble.paragraphs)
-        assert preamble.subsections[0].heading == "Summary"
+        assert len(preamble.subsections) == 1
+        box = preamble.subsections[0]
+        assert box.is_boxed is True
+        assert box.heading == "Highlight box"
+        assert box.subsections[0].heading == "Summary"
 
     def test_trailing_boxed_text_flush(self):
-        """Boxed-text after last <sec> is flushed."""
+        """Boxed-text after last <sec> is flushed as boxed subsection."""
         xml = b"""<article><body>
           <sec><title>Results</title><p>Result text.</p></sec>
           <boxed-text>
@@ -3687,7 +3701,10 @@ class TestPreambleFlushSubsections:
         doc = parse_jats(xml)
         assert len(doc.sections) == 2
         trailing = doc.sections[1]
-        assert trailing.subsections[0].heading == "Takeaway"
+        assert len(trailing.subsections) == 1
+        box = trailing.subsections[0]
+        assert box.is_boxed is True
+        assert box.subsections[0].heading == "Takeaway"
 
 
 # ---------------------------------------------------------------------------

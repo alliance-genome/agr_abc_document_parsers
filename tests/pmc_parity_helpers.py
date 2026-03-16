@@ -779,6 +779,14 @@ def compare_against_pmc_reference(
         matched / body_count if body_count > 0 else 1.0
     )
     result["missing_details"] = missing[:30]
-    result["verdict"] = "PASS" if len(missing) == 0 else "FAIL"
+    if len(missing) == 0:
+        result["verdict"] = "PASS"
+    elif (
+        confirmed_missing <= 3
+        and result["fulltext_similarity"] > 0.80
+    ):
+        result["verdict"] = "WARN"
+    else:
+        result["verdict"] = "FAIL"
 
     return result

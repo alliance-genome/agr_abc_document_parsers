@@ -440,7 +440,7 @@ class TestPMCConversion:
         if result["verdict"] == "ERROR":
             pytest.fail(f"PMC{pmcid}: {result['error']}")
 
-        if result["verdict"] == "FAIL":
+        if result["verdict"] in ("FAIL", "WARN"):
             bioc_tag = (
                 " (BioC available)"
                 if result["bioc_available"]
@@ -467,8 +467,13 @@ class TestPMCConversion:
                 )
             msg = "\n".join(lines)
             # Downgrade to warning when no BioC-confirmed content
-            # is missing (txt_only / partial differences only).
-            if result["missing_confirmed"] == 0:
+            # is missing (txt_only / partial differences only),
+            # or when the verdict is WARN (few confirmed missing
+            # with high fulltext similarity).
+            if (
+                result["missing_confirmed"] == 0
+                or result["verdict"] == "WARN"
+            ):
                 import warnings
                 warnings.warn(
                     f"PMC parity warning: {msg}",

@@ -144,7 +144,18 @@ def _emit_sections(
     if footnote_counter is None:
         footnote_counter = [0]
     for section in sections:
-        _emit_section(section, lines, base_level, footnote_counter)
+        if section.is_boxed:
+            lines.append("::: boxed-text")
+            lines.append("")
+            _emit_section(
+                section, lines, base_level, footnote_counter,
+            )
+            lines.append(":::")
+            lines.append("")
+        else:
+            _emit_section(
+                section, lines, base_level, footnote_counter,
+            )
 
 
 def _emit_section(
@@ -201,7 +212,14 @@ def _emit_section(
         else heading_level + 1
     )
     for sub in section.subsections:
-        _emit_section(sub, lines, sub_level, footnote_counter)
+        if sub.is_boxed:
+            lines.append("::: boxed-text")
+            lines.append("")
+            _emit_section(sub, lines, sub_level, footnote_counter)
+            lines.append(":::")
+            lines.append("")
+        else:
+            _emit_section(sub, lines, sub_level, footnote_counter)
 
 
 def _escape_cell(cell_text: str) -> str:
