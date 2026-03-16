@@ -398,23 +398,39 @@ def _parse_abstract_content(
 
     Handles mixed content where direct ``<p>`` and ``<sec>`` children
     are interleaved (e.g. a lead paragraph followed by structured
-    sections).
+    sections).  Also handles nested ``<sec>`` within ``<sec>``
+    (e.g. ``<abstract><sec><sec>...``).
     """
     paragraphs: list[Paragraph] = []
+
+    def _collect_sec(sec_elem: etree._Element) -> None:
+        """Recursively collect paragraphs from a ``<sec>``."""
+        title_elem = sec_elem.find("title")
+        sec_title = (all_text(title_elem)
+                     if title_elem is not None else "")
+        has_direct_p = False
+        for child in sec_elem:
+            ctag = (etree.QName(child.tag).localname
+                    if isinstance(child.tag, str) else "")
+            if ctag == "p":
+                has_direct_p = True
+                para = _parse_paragraph(child)
+                if para.text and sec_title:
+                    para.text = f"**{sec_title}:** {para.text}"
+                    sec_title = ""  # only prepend to first
+                if para.text:
+                    paragraphs.append(para)
+            elif ctag == "sec":
+                _collect_sec(child)
+        if not has_direct_p and sec_title:
+            # Empty sec with title only (skip)
+            pass
 
     for child in abstract_elem:
         tag = (etree.QName(child.tag).localname
                if isinstance(child.tag, str) else "")
         if tag == "sec":
-            title_elem = child.find("title")
-            sec_title = (all_text(title_elem)
-                         if title_elem is not None else "")
-            for p_elem in child.findall("p"):
-                para = _parse_paragraph(p_elem)
-                if para.text and sec_title:
-                    para.text = f"**{sec_title}:** {para.text}"
-                if para.text:
-                    paragraphs.append(para)
+            _collect_sec(child)
         elif tag == "p":
             para = _parse_paragraph(child)
             if para.text:
@@ -519,10 +535,12 @@ def _collect_inline_aff(
 
 
 def _parse_sub_articles(root: etree._Element) -> list[Document]:
-    """Parse ``<sub-article>`` elements into Document objects."""
+    """Parse ``<sub-article>`` and ``<response>`` elements."""
     results: list[Document] = []
     for sub_el in root.findall("sub-article"):
         results.append(_parse_sub_article(sub_el))
+    for resp_el in root.findall("response"):
+        results.append(_parse_sub_article(resp_el))
     return results
 
 
@@ -623,6 +641,10 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
 
     # References within sub-article
     doc.references = _parse_bibliography(sub_el)
+
+    # Back-matter sections (fn-groups, notes, etc.)
+    doc.competing_interests = _parse_competing_interests(sub_el)
+    doc.back_matter = _parse_back_sections(sub_el, doc)
 
     return doc
 
@@ -752,7 +774,7 @@ def _parse_competing_interests(root: etree._Element) -> str:
                 fn_text = all_text(fn)
                 if fn_text:
                     parts.append(fn_text)
-    # From back/fn-group
+    # From back/fn-group (direct children and inside notes)
     back = root.find("back")
     if back is None:
         back = root.find(".//back")
@@ -763,6 +785,13 @@ def _parse_competing_interests(root: etree._Element) -> str:
                     fn_text = all_text(fn)
                     if fn_text:
                         parts.append(fn_text)
+        for notes_el in back.findall("notes"):
+            for fg in notes_el.findall("fn-group"):
+                for fn in fg.findall("fn"):
+                    if fn.get("fn-type", "") in _COI_FN_TYPES:
+                        fn_text = all_text(fn)
+                        if fn_text:
+                            parts.append(fn_text)
         # From back/notes with COI-statement type or matching title
         if not parts:
             for notes_elem in back.findall("notes"):
@@ -1039,8 +1068,30 @@ def _dispatch_group_container(
         for fig_elem in child.findall("fig"):
             section.figures.extend(_parse_fig(fig_elem))
     elif tag == "table-wrap-group":
+        # Capture group-level label/caption for propagation
+        group_label_elem = child.find("label")
+        group_label = (all_text(group_label_elem).strip()
+                       if group_label_elem is not None else "")
+        group_cap_elem = child.find("caption")
+        group_caption = ""
+        if group_cap_elem is not None:
+            cap_title = group_cap_elem.find("title")
+            if cap_title is not None:
+                group_caption = all_text(cap_title).strip()
+            if not group_caption:
+                for cp in group_cap_elem.findall("p"):
+                    ct = all_text(cp).strip()
+                    if ct:
+                        group_caption = ct
+                        break
         for tw_elem in child.findall("table-wrap"):
-            section.tables.append(_parse_table_wrap(tw_elem))
+            table = _parse_table_wrap(tw_elem)
+            # Prepend group label/caption when the child lacks its own
+            if group_label and not table.label:
+                table.label = group_label
+            if group_caption and not table.caption:
+                table.caption = group_caption
+            section.tables.append(table)
     elif tag == "disp-formula-group":
         for df_elem in child.findall("disp-formula"):
             section.formulas.append(_parse_formula(df_elem))
@@ -2027,6 +2078,13 @@ def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
                 section.tables.append(_parse_table_wrap(child))
             else:
                 section.formulas.append(_parse_formula(child))
+        elif tag == "fn-group":
+            for fn in child.findall("fn"):
+                _extract_fn_paragraphs(fn, section)
+        elif tag == "def-list":
+            _parse_def_list(child, section)
+        elif tag == "glossary":
+            _parse_glossary(child, section, emit_title=True)
 
 
 def _parse_def_list(elem: etree._Element, section: Section) -> None:
@@ -2364,6 +2422,13 @@ def _parse_back_sections(
             # <def-list> children (abbreviation tables, etc.)
             for dl in child.findall("./def-list"):
                 _parse_def_list(dl, section)
+            # <fn-group> children inside <notes>
+            for fg in child.findall("./fn-group"):
+                for fn in fg.findall("fn"):
+                    fn_type = fn.get("fn-type", "")
+                    if fn_type in _COI_FN_TYPES:
+                        continue
+                    _extract_fn_paragraphs(fn, section)
             if (section.paragraphs or section.heading
                     or section.subsections or section.lists):
                 sections.append(section)
@@ -2446,7 +2511,8 @@ def _parse_bibliography(root: etree._Element) -> list[Reference]:
     """Extract references from back/ref-list/ref.
 
     Uses the direct ``<back>`` child to avoid picking up references
-    from nested ``<sub-article>`` elements.
+    from nested ``<sub-article>`` elements.  Also handles nested
+    ``<ref-list>`` elements (e.g. annotated bibliography sections).
     """
     back = root.find("back")
     if back is None:
@@ -2454,10 +2520,31 @@ def _parse_bibliography(root: etree._Element) -> list[Reference]:
         back = root.find(".//back")
     if back is None:
         return []
-    references = []
-    for idx, ref_elem in enumerate(back.findall("ref-list/ref")):
-        ref = _parse_ref(ref_elem, idx + 1)
-        references.append(ref)
+    references: list[Reference] = []
+    for ref_list in back.findall("ref-list"):
+        # Direct refs
+        for ref_elem in ref_list.findall("ref"):
+            ref = _parse_ref(ref_elem, len(references) + 1)
+            references.append(ref)
+        # Nested ref-lists (annotated bibliographies)
+        for sub_rl in ref_list.findall("ref-list"):
+            title_elem = sub_rl.find("title")
+            if title_elem is not None:
+                title_text = all_text(title_elem).strip()
+                if title_text:
+                    # Emit the nested ref-list title as an
+                    # annotation note reference so it appears in
+                    # the plain-text output.
+                    note_ref = Reference(
+                        index=len(references) + 1,
+                        comment=title_text,
+                    )
+                    references.append(note_ref)
+            for ref_elem in sub_rl.findall("ref"):
+                ref = _parse_ref(
+                    ref_elem, len(references) + 1,
+                )
+                references.append(ref)
     return references
 
 

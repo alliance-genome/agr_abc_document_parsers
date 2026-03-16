@@ -178,6 +178,13 @@ def extract_plain_text(
             _collect_sections_text(sub.sections, sub_parts)
             for fig in sub.figures:
                 _collect_figure_text(fig, sub_parts)
+            for table in sub.tables:
+                _collect_table_text(table, sub_parts)
+            if sub.competing_interests:
+                sub_parts.append(strip_markdown_formatting(
+                    sub.competing_interests
+                ))
+            _collect_sections_text(sub.back_matter, sub_parts)
             for p in sub_parts:
                 if p:
                     parts.append(p)

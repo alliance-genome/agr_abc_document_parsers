@@ -138,7 +138,8 @@ def read_markdown(text: str) -> Document:
         pos += 1
     if preamble_lines:
         section = _parse_section_lines("", preamble_lines, 2)
-        if section.paragraphs or section.figures or section.tables or section.lists:
+        if (section.paragraphs or section.figures or section.tables
+                or section.lists or section.notes):
             doc.sections.append(section)
 
     # --- Split main article from sub-articles at --- separators ---

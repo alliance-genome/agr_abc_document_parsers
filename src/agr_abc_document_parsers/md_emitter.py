@@ -432,6 +432,11 @@ def _emit_back_matter(
                 lines.append(f"[^{footnote_counter[0]}]: {item}")
         if section.paragraphs or section.notes or section.lists:
             lines.append("")
+        # Tables and figures in headingless sections
+        for table in section.tables:
+            _emit_table(table, lines)
+        for fig in section.figures:
+            _emit_figure(fig, lines)
         # Emit headed subsections (e.g. appendix sections)
         headed_subs = [s for s in section.subsections if s.heading]
         if headed_subs:
@@ -613,6 +618,30 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
     footnote_counter = [0]
     _emit_sections(sub.sections, lines, base_level=3,
                    footnote_counter=footnote_counter)
+    # Sub-article back-matter (fn-groups, notes, etc.)
+    if sub.competing_interests:
+        lines.append("### Competing Interests")
+        lines.append("")
+        lines.append(sub.competing_interests)
+        lines.append("")
+    if sub.back_matter:
+        _emit_sections(
+            [s for s in sub.back_matter if s.heading],
+            lines, base_level=3,
+            footnote_counter=footnote_counter,
+        )
+        for section in sub.back_matter:
+            if not section.heading:
+                for para in section.paragraphs:
+                    footnote_counter[0] += 1
+                    lines.append(
+                        f"[^{footnote_counter[0]}]: {para.text}"
+                    )
+                for note in section.notes:
+                    footnote_counter[0] += 1
+                    lines.append(f"[^{footnote_counter[0]}]: {note}")
+                if section.paragraphs or section.notes:
+                    lines.append("")
     if sub.references:
         lines.append("### References")
         lines.append("")
