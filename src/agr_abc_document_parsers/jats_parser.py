@@ -1066,17 +1066,26 @@ def _dispatch_sec_block(
         ):
             section.subsections.append(box_sec)
     elif tag == "disp-quote":
-        p_elems = child.findall("p")
-        if p_elems:
-            lines = [f"> {all_text(p)}" for p in p_elems if all_text(p)]
-            # Include <attrib> elements (quote attributions)
-            for attrib in child.findall("attrib"):
-                attrib_text = all_text(attrib)
+        lines: list[str] = []
+        for dq_child in child:
+            dq_tag = etree.QName(dq_child.tag).localname if isinstance(dq_child.tag, str) else ""
+            if dq_tag == "p":
+                t = all_text(dq_child)
+                if t:
+                    lines.append(f"> {t}")
+            elif dq_tag == "list":
+                for li in dq_child.findall("list-item"):
+                    li_p = li.find("p")
+                    li_t = _inline_text(li_p).strip() if li_p is not None else all_text(li).strip()
+                    if li_t:
+                        lines.append(f"> {li_t}")
+            elif dq_tag == "attrib":
+                attrib_text = all_text(dq_child)
                 if attrib_text:
                     lines.append(f"> {attrib_text}")
-            if lines:
-                section.paragraphs.append(Paragraph(text="\n".join(lines)))
-        else:
+        if lines:
+            section.paragraphs.append(Paragraph(text="\n".join(lines)))
+        elif not list(child):
             quote_text = all_text(child)
             if quote_text:
                 section.paragraphs.append(Paragraph(text=f"> {quote_text}"))
@@ -1583,12 +1592,10 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
                         if li_text:
                             p_parts.append(li_text)
                 # Capture text after the list (tail + siblings)
-                p_copy = deepcopy(p)
-                for lst in p_copy.findall("list"):
-                    p_copy.remove(lst)
-                trailing = _inline_text(p_copy).strip()
-                if trailing:
-                    p_parts.append(trailing)
+                for lst in p.findall("list"):
+                    tail = (lst.tail or "").strip()
+                    if tail:
+                        p_parts.append(tail)
             else:
                 p_text = _inline_text(p).strip()
                 if p_text:
@@ -1969,11 +1976,30 @@ def _parse_table_row(
             except (ValueError, OverflowError):
                 colspan = 1
             cell_align = child.get("align", "")
-            # Preserve paragraph boundaries in multi-<p> cells
-            p_children = child.findall("p")
-            if p_children:
-                parts = [_inline_text(p).strip() for p in p_children]
-                cell_text = "\n".join(t for t in parts if t)
+            # Preserve paragraph boundaries in multi-<p> cells;
+            # also extract <list> items that are direct children of td/th.
+            cell_parts: list[str] = []
+            has_block_children = False
+            for td_child in child:
+                td_tag = (
+                    etree.QName(td_child.tag).localname if isinstance(td_child.tag, str) else ""
+                )
+                if td_tag == "p":
+                    has_block_children = True
+                    t = _inline_text(td_child).strip()
+                    if t:
+                        cell_parts.append(t)
+                elif td_tag == "list":
+                    has_block_children = True
+                    for li in td_child.findall("list-item"):
+                        li_p = li.find("p")
+                        li_t = (
+                            _inline_text(li_p).strip() if li_p is not None else all_text(li).strip()
+                        )
+                        if li_t:
+                            cell_parts.append(li_t)
+            if has_block_children:
+                cell_text = "\n".join(cell_parts)
             else:
                 cell_text = _inline_text(child)
             cell = TableCell(

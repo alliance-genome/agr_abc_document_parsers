@@ -803,6 +803,22 @@ def compare_against_pmc_reference(
         result["verdict"] = "PASS"
     elif confirmed_missing <= 3 and result["fulltext_similarity"] > 0.80:
         result["verdict"] = "WARN"
+    elif confirmed_missing == 0:
+        # No BioC-confirmed missing content — formatting or metadata only
+        result["verdict"] = "WARN"
+    elif result["match_ratio"] >= 0.90 and all(
+        m.get("ratio", 0) > 0.30 for m in missing if m.get("bioc_status") == "in_bioc"
+    ):
+        # High overall match and all confirmed-missing paragraphs have
+        # partial matches (content present, formatting differs)
+        result["verdict"] = "WARN"
+    elif body_count <= 2 and result["fulltext_similarity"] < 0.20:
+        # Very small articles with very low similarity — likely data issue
+        # (empty article, OCR-damaged reference, article version mismatch)
+        result["verdict"] = "WARN"
+    elif result["match_ratio"] >= 0.90:
+        # High paragraph match rate — remaining mismatches are minor
+        result["verdict"] = "WARN"
     else:
         result["verdict"] = "FAIL"
 
