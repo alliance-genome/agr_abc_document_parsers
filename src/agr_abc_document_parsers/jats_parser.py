@@ -732,6 +732,9 @@ def _extract_funding_body_sections(doc: Document) -> None:
                 for p in sec.paragraphs:
                     if p.text:
                         extra_statements.append(p.text)
+                # Preserve non-funding subsections (e.g., COI under Funding)
+                for subsec in sec.subsections:
+                    remaining.append(subsec)
             else:
                 remaining.append(sec)
         setattr(doc, attr, remaining)
@@ -1617,6 +1620,18 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
                     fig.caption = parts[0]
                     fig.caption_paragraphs = parts[1:]
             break
+
+    # Per-figure permissions (copyright/license statements)
+    for perm in fig_elem.findall("permissions"):
+        cs = perm.find("copyright-statement")
+        if cs is not None:
+            cs_text = all_text(cs).strip()
+            if cs_text:
+                fig.caption_paragraphs.append(cs_text)
+        for lp in perm.findall("license/license-p"):
+            lp_text = all_text(lp).strip()
+            if lp_text:
+                fig.caption_paragraphs.append(lp_text)
 
     # Alt-text: may appear as direct child of <fig> or inside <graphic>
     alt_elem = fig_elem.find("alt-text")
