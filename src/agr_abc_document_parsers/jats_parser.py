@@ -1657,9 +1657,9 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
             cells = [c.text.strip() for c in row if c.text.strip()]
             if cells:
                 fig.caption_paragraphs.append(" ".join(cells))
-        for fn in tw_table.foot_notes:
-            if fn.strip():
-                fig.caption_paragraphs.append(fn.strip())
+        for foot_note in tw_table.foot_notes:
+            if foot_note.strip():
+                fig.caption_paragraphs.append(foot_note.strip())
 
     # Direct <p> children of <fig> (not inside <caption> or <abstract>).
     # Some publishers put extra text like "Reagents and conditions: ..."
