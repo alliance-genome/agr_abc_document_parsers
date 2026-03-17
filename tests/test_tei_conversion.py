@@ -225,7 +225,17 @@ def _strip_md_formatting(text: str) -> str:
         stripped = re.sub(r"</?su[bp]>", "", stripped)
         # Strip link syntax [text](url) → text
         stripped = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", stripped)
-        # Strip table cell pipes
+        # Handle table rows: split into individual cells so they match
+        # how extract_plain_text() emits each cell as a separate paragraph.
+        if stripped.startswith("|") and stripped.endswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            for cell in cells:
+                cell = re.sub(r"^[-*]\s+", "", cell)
+                cell = re.sub(r"^\d+\.\s+", "", cell)
+                if cell:
+                    lines.append(cell)
+            continue
+        # Strip table cell pipes (non-standard table lines)
         stripped = stripped.strip("|").strip()
         # Strip list markers
         stripped = re.sub(r"^[-*]\s+", "", stripped)

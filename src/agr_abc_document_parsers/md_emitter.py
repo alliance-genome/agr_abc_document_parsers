@@ -637,6 +637,10 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
         for note in sub.author_notes:
             lines.append(note)
         lines.append("")
+    if sub.abstract:
+        for para in sub.abstract:
+            lines.append(para.text)
+            lines.append("")
     footnote_counter = [0]
     _emit_sections(sub.sections, lines, base_level=3, footnote_counter=footnote_counter)
     # Sub-article back-matter (fn-groups, notes, etc.)

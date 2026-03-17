@@ -197,9 +197,13 @@ def extract_plain_text(
                 if not line:
                     continue
                 parts.append(line)
-            # Body and remaining content via recursive call
+            # Abstract, body, and remaining content
             # (skip title since we already emitted it above)
             sub_parts: list[str] = []
+            for para in sub.abstract:
+                t = strip_markdown_formatting(para.text)
+                if t:
+                    sub_parts.append(t)
             _collect_sections_text(sub.sections, sub_parts)
             for fig in sub.figures:
                 _collect_figure_text(fig, sub_parts)
@@ -318,8 +322,11 @@ def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
         for lst in section.lists:
             if lst.title:
                 parts.append(strip_markdown_formatting(lst.title))
-            for item in lst.items:
-                parts.append(strip_markdown_formatting(item))
+            for idx, item in enumerate(lst.items, 1):
+                text = strip_markdown_formatting(item)
+                if lst.ordered:
+                    text = f"{idx}. {text}"
+                parts.append(text)
 
         for note in section.notes:
             parts.append(strip_markdown_formatting(note))

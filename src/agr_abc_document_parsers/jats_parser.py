@@ -548,11 +548,11 @@ def _collect_inline_aff(
 
 
 def _parse_sub_articles(root: etree._Element) -> list[Document]:
-    """Parse ``<sub-article>`` and ``<response>`` elements."""
+    """Parse ``<sub-article>`` and ``<response>`` elements (including nested)."""
     results: list[Document] = []
-    for sub_el in root.findall("sub-article"):
+    for sub_el in root.findall(".//sub-article"):
         results.append(_parse_sub_article(sub_el))
-    for resp_el in root.findall("response"):
+    for resp_el in root.findall(".//response"):
         results.append(_parse_sub_article(resp_el))
     return results
 
@@ -644,6 +644,14 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
                 ct = all_text(corresp)
                 if ct:
                     doc.author_notes.append(ct)
+
+    # Abstract from front-stub (conference abstract supplements may have
+    # all content in <front-stub>/<abstract> with no <body>)
+    if front_stub is not None:
+        for abs_elem in front_stub.findall("abstract"):
+            abs_parts = _parse_abstract_content(abs_elem)
+            if abs_parts:
+                doc.abstract.extend(abs_parts)
 
     # Body
     doc.sections = _parse_body(sub_el)
@@ -987,6 +995,12 @@ def _parse_body(root: etree._Element) -> list[Section]:
             _dispatch_sec_block(child, tag, preamble)
         elif tag in _GROUP_CONTAINER_TAGS:
             _dispatch_group_container(child, tag, preamble, 1)
+        elif tag:
+            # Fallback: extract text from unrecognized body-level blocks
+            # (e.g., <verse-group>) to prevent silent content loss.
+            fallback_text = all_text(child)
+            if fallback_text:
+                preamble.paragraphs.append(Paragraph(text=fallback_text))
 
     # Flush trailing preamble
     if (
@@ -1249,10 +1263,29 @@ def _dispatch_sec_child(
         _dispatch_sec_block(child, tag, section)
     elif tag in _GROUP_CONTAINER_TAGS:
         _dispatch_group_container(child, tag, section, level)
+    elif tag == "statement":
+        # Theorem/proof blocks: iterate children like a mini-section
+        label_el = child.find("label")
+        if label_el is not None:
+            label_text = all_text(label_el).strip()
+            if label_text:
+                section.paragraphs.append(Paragraph(text=f"**{label_text}**"))
+        for stmt_child in child:
+            st = etree.QName(stmt_child.tag).localname if isinstance(stmt_child.tag, str) else ""
+            if st == "p":
+                _collect_from_p(stmt_child, section)
+            elif st == "disp-formula":
+                section.formulas.append(_parse_formula(stmt_child))
+            elif st == "list":
+                section.lists.append(_parse_list(stmt_child))
+            elif st not in ("label", "title"):
+                ft = all_text(stmt_child)
+                if ft:
+                    section.paragraphs.append(Paragraph(text=ft))
     else:
         # Fallback: extract text from unrecognized block elements
-        # (e.g., <verse-group>, <statement>, <code>,
-        # <chem-struct-wrap>, <array>) to prevent silent content loss.
+        # (e.g., <verse-group>, <code>, <chem-struct-wrap>, <array>)
+        # to prevent silent content loss.
         fallback_text = all_text(child)
         if fallback_text:
             section.paragraphs.append(Paragraph(text=fallback_text))
@@ -1524,13 +1557,12 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
     if label_elem is not None:
         fig.label = all_text(label_elem)
 
-    caption_elem = fig_elem.find("caption")
-    if caption_elem is not None:
+    p_parts: list[str] = []
+    for caption_elem in fig_elem.findall("caption"):
         # Caption may have <title> and/or <p>
         title = caption_elem.find("title")
-        if title is not None:
+        if title is not None and not fig.caption:
             fig.caption = _inline_text(title).strip()
-        p_parts: list[str] = []
         for p in caption_elem.findall("p"):
             # When a <p> wraps a <list>, extract each list-item
             # as a separate caption paragraph so they match the
@@ -1558,13 +1590,13 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
                 p_text = _inline_text(p).strip()
                 if p_text:
                     p_parts.append(p_text)
-        if fig.caption and p_parts:
-            # Title goes in caption, body <p>s in caption_paragraphs
-            fig.caption_paragraphs = p_parts
-        elif p_parts and not fig.caption:
-            # No title: first <p> is the caption, rest are body
-            fig.caption = p_parts[0]
-            fig.caption_paragraphs = p_parts[1:]
+    if fig.caption and p_parts:
+        # Title goes in caption, body <p>s in caption_paragraphs
+        fig.caption_paragraphs = p_parts
+    elif p_parts and not fig.caption:
+        # No title: first <p> is the caption, rest are body
+        fig.caption = p_parts[0]
+        fig.caption_paragraphs = p_parts[1:]
 
     # Some articles use <abstract abstract-type="fig_caption"> for a
     # translated caption (e.g. English translation of a Chinese caption).
@@ -1798,11 +1830,14 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
                     table.caption = translated
             break
 
-    table_elem = tw_elem.find("table")
-    if table_elem is None:
+    table_elems = tw_elem.findall("table")
+    if not table_elems:
         # Table may be inside <alternatives> wrapper
-        table_elem = tw_elem.find("alternatives/table")
-    if table_elem is not None:
+        alt_table = tw_elem.find("alternatives/table")
+        if alt_table is not None:
+            table_elems = [alt_table]
+
+    if table_elems:
         raw_rows: list[list[TableCell]] = []
         raw_spans: list[list[int]] = []
 
@@ -1816,24 +1851,25 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
                     raw_rows.append(cells)
                     raw_spans.append(spans)
 
-        # Parse thead
-        thead = table_elem.find("thead")
-        if thead is not None:
-            _collect_trs(thead, is_header=True)
+        for table_elem in table_elems:
+            # Parse thead
+            thead = table_elem.find("thead")
+            if thead is not None:
+                _collect_trs(thead, is_header=True)
 
-        # Parse tbody
-        tbody = table_elem.find("tbody")
-        if tbody is not None:
-            _collect_trs(tbody, is_header=False)
+            # Parse tbody
+            tbody = table_elem.find("tbody")
+            if tbody is not None:
+                _collect_trs(tbody, is_header=False)
 
-        # Parse tfoot (footer rows — append as data rows)
-        tfoot = table_elem.find("tfoot")
-        if tfoot is not None:
-            _collect_trs(tfoot, is_header=False)
+            # Parse tfoot (footer rows — append as data rows)
+            tfoot = table_elem.find("tfoot")
+            if tfoot is not None:
+                _collect_trs(tfoot, is_header=False)
 
-        # Direct tr elements (no thead/tbody)
-        if thead is None and tbody is None and tfoot is None:
-            _collect_trs(table_elem, is_header=False)
+            # Direct tr elements (no thead/tbody)
+            if thead is None and tbody is None and tfoot is None:
+                _collect_trs(table_elem, is_header=False)
 
         # Expand rowspan cells into subsequent rows
         table.rows = _expand_rowspans(raw_rows, raw_spans)
@@ -1918,8 +1954,15 @@ def _parse_table_row(
             except (ValueError, OverflowError):
                 colspan = 1
             cell_align = child.get("align", "")
+            # Preserve paragraph boundaries in multi-<p> cells
+            p_children = child.findall("p")
+            if p_children:
+                parts = [_inline_text(p).strip() for p in p_children]
+                cell_text = "\n".join(t for t in parts if t)
+            else:
+                cell_text = _inline_text(child)
             cell = TableCell(
-                text=all_text(child),
+                text=cell_text,
                 is_header=(tag == "th" or is_header),
                 align=cell_align,
             )
@@ -2328,6 +2371,9 @@ def _parse_single_app(app: etree._Element) -> Section:
         section.lists.append(_parse_list(list_elem))
     for boxed in app.findall("boxed-text"):
         _parse_boxed_text(boxed, section)
+    for stmt in app.findall("statement"):
+        for sp in stmt.findall("p"):
+            section.paragraphs.append(_parse_paragraph(sp))
     for supp in app.findall("supplementary-material"):
         _parse_supplementary(supp, section)
     for fn_grp in app.findall("fn-group"):
@@ -2382,9 +2428,11 @@ def _extract_fn_paragraphs(fn: etree._Element, section: Section) -> None:
 
     if p_elems:
         for p in p_elems:
-            p_text = all_text(p).strip()
+            para = _parse_paragraph(p)
+            p_text = para.text.strip()
             if p_text:
-                section.paragraphs.append(Paragraph(text=label_prefix + p_text))
+                para.text = label_prefix + p_text
+                section.paragraphs.append(para)
                 label_prefix = ""
     else:
         fn_text = all_text(fn).strip()

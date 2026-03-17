@@ -302,7 +302,9 @@ def detect_reference_start(paragraphs: list[str]) -> int | None:
     # content
     _REF_HEADING_RE = re.compile(
         r"^(?:References?|Bibliography|Literature Cited"
-        r"|Works Cited)$",
+        r"|Works Cited|Literatur|Weiterf.hrende Literatur"
+        r"|Ausgew.hlte Literatur|Bibliograf.a"
+        r"|R.f.rences|Referencias)$",
         re.IGNORECASE,
     )
     for i, para in enumerate(paragraphs):
@@ -446,6 +448,7 @@ def find_best_paragraph_match(
         return (1.0, -1)  # skip short paragraphs
 
     pmc_tokens = set(norm_pmc.split())
+    pmc_nospace = norm_pmc.replace(" ", "")
     best_ratio = 0.0
     best_idx = -1
 
@@ -461,10 +464,23 @@ def find_best_paragraph_match(
 
         # Space-stripped containment: handles table cell data where
         # token boundaries differ
-        pmc_nospace = norm_pmc.replace(" ", "")
         ours_nospace = norm_ours.replace(" ", "")
         if pmc_nospace in ours_nospace or ours_nospace in pmc_nospace:
             return (1.0, i)
+
+        # Table cell sub-paragraph check: GFM tables merge multi-<p>
+        # cells into one string. Check if the PMC paragraph matches
+        # any individual cell within a table row.
+        if "|" in our_para:
+            for cell in our_para.split("|"):
+                norm_cell = normalize_paragraph(cell)
+                if not norm_cell:
+                    continue
+                if norm_pmc in norm_cell or norm_cell in norm_pmc:
+                    return (1.0, i)
+                cell_nospace = norm_cell.replace(" ", "")
+                if pmc_nospace in cell_nospace or cell_nospace in pmc_nospace:
+                    return (1.0, i)
 
         # Token overlap pre-filter
         our_tokens = set(norm_ours.split())

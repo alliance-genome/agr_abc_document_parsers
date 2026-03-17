@@ -171,9 +171,13 @@ def read_markdown(text: str) -> Document:
     found_ref = False
     for heading, content_lines, is_boxed in h2_blocks:
         if heading == "Abstract":
-            doc.abstract, kw = _parse_abstract_lines(content_lines)
-            if kw and not doc.keywords:
-                doc.keywords = kw
+            if not doc.abstract:
+                doc.abstract, kw = _parse_abstract_lines(content_lines)
+                if kw and not doc.keywords:
+                    doc.keywords = kw
+            else:
+                # Second Abstract block → store as secondary
+                doc.secondary_abstracts.append(_parse_secondary_abstract(heading, content_lines))
         elif heading in _SECONDARY_LABELS and not found_ack and not found_ref:
             # Extract keywords that may be embedded in this block
             for cl in content_lines:
