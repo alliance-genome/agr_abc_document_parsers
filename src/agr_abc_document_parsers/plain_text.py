@@ -1,4 +1,5 @@
 """Extract plain text from Document models for downstream ML pipelines."""
+
 from __future__ import annotations
 
 import re
@@ -11,28 +12,56 @@ from agr_abc_document_parsers.models import Document, Figure, Section, Table
 
 # Order matters: bold (**) before italic (*) to avoid partial matches.
 _STRIP_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),          # **bold**
-    (re.compile(r"\*(.+?)\*"), r"\1"),               # *italic*
-    (re.compile(r"~~(.+?)~~"), r"\1"),               # ~~strikethrough~~
-    (re.compile(r"<u>(.+?)</u>", re.I), r"\1"),     # <u>underline</u>
+    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),  # **bold**
+    (re.compile(r"\*(.+?)\*"), r"\1"),  # *italic*
+    (re.compile(r"~~(.+?)~~"), r"\1"),  # ~~strikethrough~~
+    (re.compile(r"<u>(.+?)</u>", re.I), r"\1"),  # <u>underline</u>
     (re.compile(r"<sup>(.+?)</sup>", re.I), r"\1"),  # <sup>x</sup>
     (re.compile(r"<sub>(.+?)</sub>", re.I), r"\1"),  # <sub>x</sub>
-    (re.compile(r"`(.+?)`"), r"\1"),                 # `monospace`
-    (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),   # [text](url)
-    (re.compile(r"\\([*])"), r"\1"),                 # \* → * (unescape)
+    (re.compile(r"`(.+?)`"), r"\1"),  # `monospace`
+    (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"),  # [text](url)
+    (re.compile(r"\\([*])"), r"\1"),  # \* → * (unescape)
 ]
 
 # Sentence splitting: split on .!? followed by whitespace + uppercase letter,
 # but not after common abbreviations.
 _ABBREVIATIONS = {
-    "Dr", "Mr", "Mrs", "Ms", "Prof", "Jr", "Sr",
-    "Fig", "Figs", "Fig.", "Figs.",
-    "No", "Nos", "Vol", "Vols",
-    "al", "etc", "approx", "ca",
-    "vs", "cf", "viz", "i.e", "e.g",
-    "Eq", "Eqs", "Ref", "Refs",
-    "Dept", "Univ", "Inc", "Corp", "Ltd",
-    "St", "Ave", "Blvd",
+    "Dr",
+    "Mr",
+    "Mrs",
+    "Ms",
+    "Prof",
+    "Jr",
+    "Sr",
+    "Fig",
+    "Figs",
+    "Fig.",
+    "Figs.",
+    "No",
+    "Nos",
+    "Vol",
+    "Vols",
+    "al",
+    "etc",
+    "approx",
+    "ca",
+    "vs",
+    "cf",
+    "viz",
+    "i.e",
+    "e.g",
+    "Eq",
+    "Eqs",
+    "Ref",
+    "Refs",
+    "Dept",
+    "Univ",
+    "Inc",
+    "Corp",
+    "Ltd",
+    "St",
+    "Ave",
+    "Blvd",
 }
 
 # ---------------------------------------------------------------------------
@@ -129,9 +158,7 @@ def extract_plain_text(
                 else:
                     parts.append(entry.funder)
         if doc.funding_statement:
-            parts.append(strip_markdown_formatting(
-                doc.funding_statement
-            ))
+            parts.append(strip_markdown_formatting(doc.funding_statement))
     if doc.author_notes:
         parts.append("Author Notes")
         for note in doc.author_notes:
@@ -166,9 +193,7 @@ def extract_plain_text(
                 parts.append(strip_markdown_formatting(sub.title))
             # Author/editor lines for sub-articles
             for author in sub.authors:
-                line = (
-                    f"{author.given_name} {author.surname}".strip()
-                )
+                line = f"{author.given_name} {author.surname}".strip()
                 if not line:
                     continue
                 parts.append(line)
@@ -181,9 +206,7 @@ def extract_plain_text(
             for table in sub.tables:
                 _collect_table_text(table, sub_parts)
             if sub.competing_interests:
-                sub_parts.append(strip_markdown_formatting(
-                    sub.competing_interests
-                ))
+                sub_parts.append(strip_markdown_formatting(sub.competing_interests))
             _collect_sections_text(sub.back_matter, sub_parts)
             for p in sub_parts:
                 if p:
@@ -208,7 +231,8 @@ def extract_abstract_text(doc: Document) -> str:
 
 
 def extract_sentences(
-    doc: Document, include_supplements: bool = True,
+    doc: Document,
+    include_supplements: bool = True,
 ) -> list[str]:
     """Split document text into sentences.
 

@@ -1,4 +1,5 @@
 """Intermediate document model for XML-to-Markdown conversion."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ class Author:
 @dataclass
 class InlineRef:
     """An inline citation reference like [1] or (Author, 2024)."""
+
     text: str = ""
     target: str = ""  # e.g., "#b12" pointing to a biblStruct
 
@@ -34,6 +36,7 @@ class InlineRef:
 @dataclass
 class NamedContent:
     """An annotated text span from <named-content> or <styled-content>."""
+
     text: str = ""
     content_type: str = ""
 
@@ -47,13 +50,13 @@ class Paragraph:
 
 @dataclass
 class Figure:
-    label: str = ""       # "Figure 1" or "Fig. 1"
-    caption: str = ""     # caption title (from <title> inside <caption>)
+    label: str = ""  # "Figure 1" or "Fig. 1"
+    caption: str = ""  # caption title (from <title> inside <caption>)
     caption_paragraphs: list[str] = field(default_factory=list)  # body <p>s
-    alt_text: str = ""    # alternative text from <alt-text> / <graphic>
-    attrib: str = ""      # attribution / source text from <attrib>
+    alt_text: str = ""  # alternative text from <alt-text> / <graphic>
+    attrib: str = ""  # attribution / source text from <attrib>
     graphic_url: str = ""  # image ref (preserved for downstream; not in Markdown)
-    doi: str = ""         # figure-level DOI (from <object-id pub-id-type="doi">)
+    doi: str = ""  # figure-level DOI (from <object-id pub-id-type="doi">)
 
 
 @dataclass
@@ -65,7 +68,7 @@ class TableCell:
 
 @dataclass
 class Table:
-    label: str = ""              # "Table 1"
+    label: str = ""  # "Table 1"
     caption: str = ""
     foot_notes: list[str] = field(default_factory=list)
     rows: list[list[TableCell]] = field(default_factory=list)
@@ -86,8 +89,8 @@ class ListBlock:
 
 @dataclass
 class SecondaryAbstract:
-    abstract_type: str = ""   # "summary", "executive-summary", "toc", etc.
-    label: str = ""           # "Author Summary", "eLife Digest", etc.
+    abstract_type: str = ""  # "summary", "executive-summary", "toc", etc.
+    label: str = ""  # "Author Summary", "eLife Digest", etc.
     paragraphs: list[Paragraph] = field(default_factory=list)
 
 
@@ -100,8 +103,8 @@ class FundingEntry:
 @dataclass
 class Section:
     heading: str = ""
-    number: str = ""                  # "1", "1.1", etc. from <head n="...">
-    level: int = 1                    # nesting depth -> Markdown heading level
+    number: str = ""  # "1", "1.1", etc. from <head n="...">
+    level: int = 1  # nesting depth -> Markdown heading level
     paragraphs: list[Paragraph] = field(default_factory=list)
     figures: list[Figure] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
@@ -109,12 +112,13 @@ class Section:
     lists: list[ListBlock] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     subsections: list[Section] = field(default_factory=list)
-    is_boxed: bool = False            # True when from <boxed-text>
+    is_boxed: bool = False  # True when from <boxed-text>
 
 
 @dataclass
 class Reference:
     """A single entry in the bibliography."""
+
     index: int = 0
     authors: list[str] = field(default_factory=list)  # "Surname FN" format
     editors: list[str] = field(default_factory=list)
@@ -168,13 +172,13 @@ class Document:
     data_availability: str = ""
     author_notes: list[str] = field(default_factory=list)
     competing_interests: str = ""
-    received_date: str = ""   # ISO-ish: "2014-02-06" or "2014-02"
-    accepted_date: str = ""   # ISO-ish: "2014-02-06" or "2014-02"
-    copyright: str = ""       # copyright statement text
-    license_url: str = ""     # license URL (e.g., Creative Commons)
-    self_uri: str = ""        # article self-URI (e.g., PDF link)
+    received_date: str = ""  # ISO-ish: "2014-02-06" or "2014-02"
+    accepted_date: str = ""  # ISO-ish: "2014-02-06" or "2014-02"
+    copyright: str = ""  # copyright statement text
+    license_url: str = ""  # license URL (e.g., Creative Commons)
+    self_uri: str = ""  # article self-URI (e.g., PDF link)
     trans_titles: list[str] = field(default_factory=list)  # translated titles
-    counts: dict[str, int] = field(default_factory=dict)   # page-count, fig-count, etc.
+    counts: dict[str, int] = field(default_factory=dict)  # page-count, fig-count, etc.
 
     # -- Loading methods ---------------------------------------------------
 
@@ -375,7 +379,8 @@ def _resolve_format_from_path(path: Path) -> Format:
 
 
 def _read_file(
-    path: str | Path, format: Format,
+    path: str | Path,
+    format: Format,
 ) -> tuple[DocumentInput, Format]:
     """Read a file and resolve its format.
 
@@ -399,10 +404,9 @@ def _parse_content(data: DocumentInput, format: Format) -> Document:
     if isinstance(data, str):
         if format in ("auto", "markdown"):
             from agr_abc_document_parsers.md_reader import read_markdown
+
             return read_markdown(data)
-        raise ValueError(
-            f"str input requires format='markdown' or 'auto', got '{format}'"
-        )
+        raise ValueError(f"str input requires format='markdown' or 'auto', got '{format}'")
 
     # bytes — may be gzipped XML
     if format == "markdown":
@@ -410,15 +414,18 @@ def _parse_content(data: DocumentInput, format: Format) -> Document:
 
     if format == "auto":
         from agr_abc_document_parsers.converter import detect_format
+
         detected = detect_format(data)
     else:
         detected = format
 
     if detected == "tei":
         from agr_abc_document_parsers.tei_parser import parse_tei
+
         return parse_tei(data)
     if detected == "jats":
         from agr_abc_document_parsers.jats_parser import parse_jats
+
         return parse_jats(data)
 
     raise ValueError(f"Unknown format: '{detected}'")

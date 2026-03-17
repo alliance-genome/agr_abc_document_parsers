@@ -1,4 +1,5 @@
 """Shared XML text-extraction utilities for JATS and TEI parsers."""
+
 from __future__ import annotations
 
 import gzip
@@ -28,8 +29,11 @@ def parse_xml(xml_content: bytes) -> etree._Element:
     """
     xml_content = maybe_decompress(xml_content)
     parser = etree.XMLParser(
-        recover=True, no_network=True, load_dtd=False,
-        resolve_entities=False, huge_tree=False,
+        recover=True,
+        no_network=True,
+        load_dtd=False,
+        resolve_entities=False,
+        huge_tree=False,
     )
     root = etree.fromstring(xml_content, parser=parser)
     if root is None:

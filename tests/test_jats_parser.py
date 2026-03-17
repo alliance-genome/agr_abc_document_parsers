@@ -356,10 +356,7 @@ class TestJatsParser:
         """//back/app-group -> back_matter."""
         doc = parse_jats(FULL_JATS)
         assert len(doc.back_matter) >= 1
-        assert any(
-            "Supplementary Methods" in s.heading
-            for s in doc.back_matter
-        )
+        assert any("Supplementary Methods" in s.heading for s in doc.back_matter)
 
     def test_source_format_set(self):
         """Document.source_format is 'jats'."""
@@ -664,8 +661,7 @@ class TestJatsParser:
 """
         doc = parse_jats(jats)
         sec = doc.sections[0]
-        supp_paras = [p for p in sec.paragraphs
-                      if "Supplementary" in p.text]
+        supp_paras = [p for p in sec.paragraphs if "Supplementary" in p.text]
         assert len(supp_paras) == 1
         assert "Additional data" in supp_paras[0].text
 
@@ -900,8 +896,7 @@ class TestJatsParser:
         doc = parse_jats(jats)
         headings = [s.heading for s in doc.back_matter]
         assert "Abbreviations" in headings
-        abbr = [s for s in doc.back_matter
-                if s.heading == "Abbreviations"][0]
+        abbr = [s for s in doc.back_matter if s.heading == "Abbreviations"][0]
         assert len(abbr.lists) >= 1
         assert "**GO**" in abbr.lists[0].items[0]
 
@@ -1061,11 +1056,9 @@ class TestJatsParser:
 </back></article>
 """
         doc = parse_jats(jats)
-        abbr = [s for s in doc.back_matter
-                if s.heading == "Abbreviations"][0]
+        abbr = [s for s in doc.back_matter if s.heading == "Abbreviations"][0]
         # Title should be the section heading, not also a bold paragraph
-        bold_titles = [p for p in abbr.paragraphs
-                       if "**Abbreviations**" in p.text]
+        bold_titles = [p for p in abbr.paragraphs if "**Abbreviations**" in p.text]
         assert len(bold_titles) == 0
 
     def test_parse_whitespace_normalization(self):
@@ -1337,7 +1330,9 @@ class TestJatsAuthorRoles:
         doc = parse_jats(AUTHOR_ROLES_JATS)
         assert len(doc.authors) == 3
         assert doc.authors[0].roles == [
-            "Conceptualization", "Software", "Formal analysis",
+            "Conceptualization",
+            "Software",
+            "Formal analysis",
         ]
         assert doc.authors[1].roles == ["Investigation"]
         assert doc.authors[2].roles == []
@@ -2010,8 +2005,7 @@ class TestFallbackBlockExtraction:
         sec = doc.sections[0]
         all_text_parts = [p.text for p in sec.paragraphs]
         assert any("Normal paragraph" in t for t in all_text_parts)
-        assert any("Dr. Smith" in t or "speech element" in t
-                    for t in all_text_parts)
+        assert any("Dr. Smith" in t or "speech element" in t for t in all_text_parts)
 
     def test_verse_group_text_preserved(self):
         """<verse-group> text extracted via fallback."""
@@ -2471,8 +2465,7 @@ class TestMediaElements:
         </sec></body></article>"""
         doc = parse_jats(xml)
         sec = doc.sections[0]
-        media_paras = [p for p in sec.paragraphs
-                       if "Video 1" in p.text]
+        media_paras = [p for p in sec.paragraphs if "Video 1" in p.text]
         assert len(media_paras) == 1
         assert "cell division" in media_paras[0].text
 
@@ -2489,8 +2482,7 @@ class TestMediaElements:
         </sec></body></article>"""
         doc = parse_jats(xml)
         sec = doc.sections[0]
-        media_paras = [p for p in sec.paragraphs
-                       if "dataset" in p.text.lower()]
+        media_paras = [p for p in sec.paragraphs if "dataset" in p.text.lower()]
         assert len(media_paras) == 1
 
     def test_media_at_body_level(self):
@@ -2507,8 +2499,7 @@ class TestMediaElements:
         </body></article>"""
         doc = parse_jats(xml)
         assert len(doc.sections) == 1
-        media_paras = [p for p in doc.sections[0].paragraphs
-                       if "Animation 1" in p.text]
+        media_paras = [p for p in doc.sections[0].paragraphs if "Animation 1" in p.text]
         assert len(media_paras) == 1
 
 
@@ -3162,6 +3153,7 @@ class TestRowspanExpansion:
 
 # ── Trans-title-group ────────────────────────────────────────────────
 
+
 class TestTransTitleGroup:
     """Tests for <trans-title-group> translated title extraction."""
 
@@ -3253,12 +3245,14 @@ class TestTransTitleGroup:
         </article-meta></front></article>"""
         doc = parse_jats(xml)
         from agr_abc_document_parsers.md_emitter import emit_markdown
+
         md = emit_markdown(doc)
         assert "# Main Title" in md
         assert "*Titulo Principal [es]*" in md
 
 
 # ── Counts metadata ──────────────────────────────────────────────────
+
 
 class TestCountsMetadata:
     """Tests for <counts> metadata extraction."""
@@ -3314,6 +3308,7 @@ class TestCountsMetadata:
 
 
 # ── Email and URI inline rendering ───────────────────────────────────
+
 
 class TestEmailInline:
     """Tests for <email> element handling in paragraphs."""
@@ -3396,11 +3391,11 @@ class TestUriInline:
           <fig><label>Fig 1</label></fig></p>
         </sec></body></article>"""
         doc = parse_jats(xml)
-        assert "[Dataset](http://example.com/data)" in \
-            doc.sections[0].paragraphs[0].text
+        assert "[Dataset](http://example.com/data)" in doc.sections[0].paragraphs[0].text
 
 
 # ── Named-content content-type annotation ────────────────────────────
+
 
 class TestNamedContentAnnotation:
     """Tests for <named-content> content-type attribute extraction."""
@@ -3495,6 +3490,7 @@ class TestNamedContentAnnotation:
 
 # ── Table cell alignment ─────────────────────────────────────────────
 
+
 class TestTableCellAlignment:
     """Tests for table cell align attribute extraction and markdown emission."""
 
@@ -3542,6 +3538,7 @@ class TestTableCellAlignment:
         </sec></body></article>"""
         doc = parse_jats(xml)
         from agr_abc_document_parsers.md_emitter import emit_markdown
+
         md = emit_markdown(doc)
         assert "|---|:---:|---:|" in md
 
@@ -3558,6 +3555,7 @@ class TestTableCellAlignment:
         </sec></body></article>"""
         doc = parse_jats(xml)
         from agr_abc_document_parsers.md_emitter import emit_markdown
+
         md = emit_markdown(doc)
         assert "|---|---|" in md
 
@@ -3588,6 +3586,7 @@ class TestTableCellAlignment:
 # ---------------------------------------------------------------------------
 # Bug fix: multiple <table-wrap-foot> elements per table
 # ---------------------------------------------------------------------------
+
 
 class TestMultipleTableWrapFoot:
     """Verify all <table-wrap-foot> elements are captured, not just the first."""
@@ -3638,6 +3637,7 @@ class TestMultipleTableWrapFoot:
 # ---------------------------------------------------------------------------
 # Bug fix: preamble flush with subsections/notes from boxed-text
 # ---------------------------------------------------------------------------
+
 
 class TestPreambleFlushSubsections:
     """Boxed-text content before first <sec> must not be lost."""
@@ -3711,6 +3711,7 @@ class TestPreambleFlushSubsections:
 # Bug fix: <sec> children inside <ack>
 # ---------------------------------------------------------------------------
 
+
 class TestAckSubSections:
     """Sections nested inside <ack> become back_matter entries."""
 
@@ -3750,8 +3751,7 @@ class TestAckSubSections:
         doc = parse_jats(xml)
         assert "Thanks" in doc.acknowledgments
         ack_headings = [
-            s.heading for s in doc.back_matter
-            if "CRediT" in s.heading or "Ethical" in s.heading
+            s.heading for s in doc.back_matter if "CRediT" in s.heading or "Ethical" in s.heading
         ]
         assert ack_headings == []
 
@@ -3759,6 +3759,7 @@ class TestAckSubSections:
 # ---------------------------------------------------------------------------
 # Bug fix: nested <notes> inside <notes> in back-matter
 # ---------------------------------------------------------------------------
+
 
 class TestNestedNotes:
     """Nested <notes> elements become subsections."""
@@ -3789,10 +3790,7 @@ class TestNestedNotes:
         assert len(decl[0].subsections) == 2
         assert decl[0].subsections[0].heading == "Ethics approval"
         assert decl[0].subsections[1].heading == "Consent for publication"
-        assert any(
-            "Approved by IRB" in p.text
-            for p in decl[0].subsections[0].paragraphs
-        )
+        assert any("Approved by IRB" in p.text for p in decl[0].subsections[0].paragraphs)
 
     def test_notes_with_direct_p_and_nested(self):
         """Notes with both direct <p> and nested <notes>."""
@@ -3825,6 +3823,7 @@ class TestNestedNotes:
 # Bug fix: <boxed-text> in <floats-group>
 # ---------------------------------------------------------------------------
 
+
 class TestBoxedTextInFloatsGroup:
     """Boxed-text in floats-group becomes back_matter."""
 
@@ -3846,9 +3845,7 @@ class TestBoxedTextInFloatsGroup:
         </article>"""
         doc = parse_jats(xml)
         # Boxed-text content should be in back_matter
-        bm_with_lists = [
-            s for s in doc.back_matter if s.lists
-        ]
+        bm_with_lists = [s for s in doc.back_matter if s.lists]
         assert len(bm_with_lists) >= 1
         items = bm_with_lists[0].lists[0].items
         assert "Point one." in items[0]
@@ -3858,6 +3855,7 @@ class TestBoxedTextInFloatsGroup:
 # ---------------------------------------------------------------------------
 # Bug fix: mixed <p> and <sec> in abstract
 # ---------------------------------------------------------------------------
+
 
 class TestMixedAbstract:
     """Abstract with both direct <p> and <sec> children."""

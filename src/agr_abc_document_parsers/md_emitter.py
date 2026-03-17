@@ -1,4 +1,5 @@
 """Emit docling-style Markdown from the intermediate Document model."""
+
 from __future__ import annotations
 
 from agr_abc_document_parsers.models import (
@@ -32,8 +33,7 @@ def emit_markdown(doc: Document) -> str:
     _emit_secondary_abstracts(doc, lines)
     _emit_keywords(doc, lines)
     footnote_counter = [0]  # mutable counter shared across sections
-    _emit_sections(doc.sections, lines, base_level=2,
-                   footnote_counter=footnote_counter)
+    _emit_sections(doc.sections, lines, base_level=2, footnote_counter=footnote_counter)
     _emit_doc_level_figures(doc, lines)
     _emit_doc_level_tables(doc, lines)
     _emit_acknowledgments(doc, lines)
@@ -138,7 +138,9 @@ def _emit_keywords(doc: Document, lines: list[str]) -> None:
 
 
 def _emit_sections(
-    sections: list[Section], lines: list[str], base_level: int,
+    sections: list[Section],
+    lines: list[str],
+    base_level: int,
     footnote_counter: list[int] | None = None,
 ) -> None:
     if footnote_counter is None:
@@ -148,18 +150,26 @@ def _emit_sections(
             lines.append("::: boxed-text")
             lines.append("")
             _emit_section(
-                section, lines, base_level, footnote_counter,
+                section,
+                lines,
+                base_level,
+                footnote_counter,
             )
             lines.append(":::")
             lines.append("")
         else:
             _emit_section(
-                section, lines, base_level, footnote_counter,
+                section,
+                lines,
+                base_level,
+                footnote_counter,
             )
 
 
 def _emit_section(
-    section: Section, lines: list[str], heading_level: int,
+    section: Section,
+    lines: list[str],
+    heading_level: int,
     footnote_counter: list[int] | None = None,
 ) -> None:
     if footnote_counter is None:
@@ -207,10 +217,7 @@ def _emit_section(
     # Subsections — when the parent section has no heading, emit
     # subsections at the same level so they don't become orphan
     # headings that the Markdown reader cannot reconstruct.
-    sub_level = (
-        heading_level if not section.heading
-        else heading_level + 1
-    )
+    sub_level = heading_level if not section.heading else heading_level + 1
     for sub in section.subsections:
         if sub.is_boxed:
             lines.append("::: boxed-text")
@@ -418,8 +425,7 @@ def _emit_data_availability(doc: Document, lines: list[str]) -> None:
     # Skip if the content is already in back_matter with original heading
     for section in doc.back_matter:
         if section.paragraphs and any(
-            doc.data_availability[:40] in p.text
-            for p in section.paragraphs
+            doc.data_availability[:40] in p.text for p in section.paragraphs
         ):
             return
     lines.append("## Data Availability")
@@ -429,7 +435,8 @@ def _emit_data_availability(doc: Document, lines: list[str]) -> None:
 
 
 def _emit_back_matter(
-    doc: Document, lines: list[str],
+    doc: Document,
+    lines: list[str],
     footnote_counter: list[int] | None = None,
 ) -> None:
     if not doc.back_matter:
@@ -441,8 +448,7 @@ def _emit_back_matter(
     # adjacent sections during markdown roundtrip.
     headed = [s for s in doc.back_matter if s.heading]
     headingless = [s for s in doc.back_matter if not s.heading]
-    _emit_sections(headed, lines, base_level=2,
-                   footnote_counter=footnote_counter)
+    _emit_sections(headed, lines, base_level=2, footnote_counter=footnote_counter)
     for section in headingless:
         for para in section.paragraphs:
             footnote_counter[0] += 1
@@ -464,8 +470,7 @@ def _emit_back_matter(
         # Emit headed subsections (e.g. appendix sections)
         headed_subs = [s for s in section.subsections if s.heading]
         if headed_subs:
-            _emit_sections(headed_subs, lines, base_level=2,
-                           footnote_counter=footnote_counter)
+            _emit_sections(headed_subs, lines, base_level=2, footnote_counter=footnote_counter)
 
 
 def _format_ref_source(ref: Reference) -> list[str]:
@@ -588,9 +593,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
             # Editor/reviewer style: one contributor per line with
             # role and inline affiliation details.
             for author in sub.authors:
-                parts = [
-                    f"{author.surname} {author.given_name}".strip()
-                ]
+                parts = [f"{author.surname} {author.given_name}".strip()]
                 if not parts[0]:
                     continue
                 for role in author.roles:
@@ -613,10 +616,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
                 name = f"{author.surname} {author.given_name}".strip()
                 if not name:
                     continue
-                nums = " ".join(
-                    str(aff_index[a]) for a in author.affiliations
-                    if a in aff_index
-                )
+                nums = " ".join(str(aff_index[a]) for a in author.affiliations if a in aff_index)
                 if nums:
                     name = f"{name} {nums}"
                 lines.append(name)
@@ -627,9 +627,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
             # Simple style: comma-separated names on one line.
             author_parts = []
             for author in sub.authors:
-                name = (
-                    f"{author.given_name} {author.surname}".strip()
-                )
+                name = f"{author.given_name} {author.surname}".strip()
                 if name:
                     author_parts.append(name)
             if author_parts:
@@ -640,8 +638,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
             lines.append(note)
         lines.append("")
     footnote_counter = [0]
-    _emit_sections(sub.sections, lines, base_level=3,
-                   footnote_counter=footnote_counter)
+    _emit_sections(sub.sections, lines, base_level=3, footnote_counter=footnote_counter)
     # Sub-article back-matter (fn-groups, notes, etc.)
     if sub.competing_interests:
         lines.append("### Competing Interests")
@@ -651,16 +648,15 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
     if sub.back_matter:
         _emit_sections(
             [s for s in sub.back_matter if s.heading],
-            lines, base_level=3,
+            lines,
+            base_level=3,
             footnote_counter=footnote_counter,
         )
         for section in sub.back_matter:
             if not section.heading:
                 for para in section.paragraphs:
                     footnote_counter[0] += 1
-                    lines.append(
-                        f"[^{footnote_counter[0]}]: {para.text}"
-                    )
+                    lines.append(f"[^{footnote_counter[0]}]: {para.text}")
                 for note in section.notes:
                     footnote_counter[0] += 1
                     lines.append(f"[^{footnote_counter[0]}]: {note}")

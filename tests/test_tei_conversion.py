@@ -10,6 +10,7 @@ Requires:
 - AWS credentials for agr-literature S3 bucket
 - Credentials configured in .env file at project root
 """
+
 from __future__ import annotations
 
 import difflib
@@ -54,9 +55,7 @@ def _fetch_tei_md5sums(limit: int = 50) -> list[dict[str, Any]]:
 
     db_config = get_db_config()
     if not db_config["host"]:
-        pytest.skip(
-            "PSQL_HOST not configured — set in .env or environment"
-        )
+        pytest.skip("PSQL_HOST not configured — set in .env or environment")
         return []
 
     query = """
@@ -85,11 +84,7 @@ def _fetch_tei_md5sums(limit: int = 50) -> list[dict[str, Any]]:
         pytest.skip(f"Cannot connect to database: {exc}")
         return []
 
-    return [
-        {"md5sum": row[0], "reference_id": row[1],
-         "display_name": row[2]}
-        for row in rows
-    ]
+    return [{"md5sum": row[0], "reference_id": row[1], "display_name": row[2]} for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +156,8 @@ def _paragraph_similarity(para1: str, para2: str) -> float:
 
 
 def _find_best_match(
-    needle: str, haystack: list[str],
+    needle: str,
+    haystack: list[str],
 ) -> tuple[float, int]:
     """Find the best matching string from haystack for needle.
 
@@ -186,9 +182,7 @@ def _find_best_match(
 
         # Token overlap pre-filter
         cand_tokens = set(norm_cand.split())
-        overlap = len(needle_tokens & cand_tokens) / max(
-            len(needle_tokens), len(cand_tokens), 1
-        )
+        overlap = len(needle_tokens & cand_tokens) / max(len(needle_tokens), len(cand_tokens), 1)
         if overlap < 0.3:
             continue
 
@@ -242,7 +236,9 @@ def _strip_md_formatting(text: str) -> str:
 
 
 def _compare_tei_roundtrip(
-    tei_data: bytes, md5sum: str, display_name: str,
+    tei_data: bytes,
+    md5sum: str,
+    display_name: str,
 ) -> dict[str, Any]:
     """Compare TEI→MD to verify content preservation.
 
@@ -310,12 +306,8 @@ def _compare_tei_roundtrip(
     # --- Step 5: Structural counts ---
     result["orig_sections"] = _count_sections(orig_doc.sections)
     all_sections = _flatten_sections(orig_doc.sections)
-    result["orig_figures"] = len(orig_doc.figures) + sum(
-        len(s.figures) for s in all_sections
-    )
-    result["orig_tables"] = len(orig_doc.tables) + sum(
-        len(s.tables) for s in all_sections
-    )
+    result["orig_figures"] = len(orig_doc.figures) + sum(len(s.figures) for s in all_sections)
+    result["orig_tables"] = len(orig_doc.tables) + sum(len(s.tables) for s in all_sections)
     result["orig_refs"] = len(orig_doc.references)
 
     # --- Step 6: Fulltext similarity ---
@@ -323,7 +315,9 @@ def _compare_tei_roundtrip(
     norm_md = _normalize_text(md_stripped)
     if norm_orig and norm_md:
         result["fulltext_similarity"] = difflib.SequenceMatcher(
-            None, norm_orig, norm_md,
+            None,
+            norm_orig,
+            norm_md,
         ).ratio()
 
     # --- Step 7: Paragraph-level comparison ---
@@ -341,19 +335,17 @@ def _compare_tei_roundtrip(
         if best_ratio >= 0.85:
             matched += 1
         else:
-            missing.append({
-                "ratio": round(best_ratio, 3),
-                "original_text": orig_para[:200],
-                "best_match_text": (
-                    md_paragraphs[best_idx][:200] if best_idx >= 0 else ""
-                ),
-            })
+            missing.append(
+                {
+                    "ratio": round(best_ratio, 3),
+                    "original_text": orig_para[:200],
+                    "best_match_text": (md_paragraphs[best_idx][:200] if best_idx >= 0 else ""),
+                }
+            )
 
     result["matched_paragraphs"] = matched
     result["missing_paragraphs"] = len(missing)
-    result["match_ratio"] = (
-        matched / len(orig_paragraphs) if orig_paragraphs else 1.0
-    )
+    result["match_ratio"] = matched / len(orig_paragraphs) if orig_paragraphs else 1.0
     result["missing_details"] = missing[:20]
     result["verdict"] = "PASS" if len(missing) == 0 else "FAIL"
 
@@ -471,7 +463,9 @@ class TestTEIConversion:
     """Compare TEI→Markdown round-trip to verify content preservation."""
 
     def test_tei_content_parity(
-        self, tei_file_info, tei_results,
+        self,
+        tei_file_info,
+        tei_results,
     ):
         md5sum = tei_file_info["md5sum"]
         display_name = tei_file_info.get("display_name", md5sum)
@@ -508,8 +502,5 @@ class TestTEIConversion:
                 f"refs: {result['orig_refs']}"
             )
             for detail in result["missing_details"][:5]:
-                lines.append(
-                    f"  ratio={detail['ratio']:.2f}: "
-                    f"{detail['original_text'][:120]}..."
-                )
+                lines.append(f"  ratio={detail['ratio']:.2f}: {detail['original_text'][:120]}...")
             pytest.fail("\n".join(lines))

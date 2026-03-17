@@ -1,4 +1,5 @@
 """Parse PMC nXML/JATS XML into the intermediate Document model."""
+
 from __future__ import annotations
 
 import logging
@@ -117,11 +118,11 @@ def parse_jats(
 
     main_abstract_elem = _find_main_abstract(root)
     doc.abstract = (
-        _parse_abstract_content(main_abstract_elem)
-        if main_abstract_elem is not None else []
+        _parse_abstract_content(main_abstract_elem) if main_abstract_elem is not None else []
     )
     doc.secondary_abstracts = _parse_secondary_abstracts(
-        root, main_abstract_elem,
+        root,
+        main_abstract_elem,
     )
     doc.categories = _parse_categories(root)
 
@@ -254,9 +255,7 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
         doc.journal = text(journal_el)
     else:
         # Fallback: abbreviated journal name
-        abbrev_el = root.find(
-            ".//journal-meta/journal-id[@journal-id-type='nlm-ta']"
-        )
+        abbrev_el = root.find(".//journal-meta/journal-id[@journal-id-type='nlm-ta']")
         if abbrev_el is not None:
             doc.journal = text(abbrev_el)
 
@@ -300,9 +299,7 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
     # License URL
     lic_elem = meta.find(".//permissions/license")
     if lic_elem is not None:
-        lic_href = lic_elem.get(
-            "{http://www.w3.org/1999/xlink}href", ""
-        )
+        lic_href = lic_elem.get("{http://www.w3.org/1999/xlink}href", "")
         if not lic_href:
             lic_href = lic_elem.get("href", "")
         doc.license_url = lic_href
@@ -326,9 +323,7 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
     # Self-URI (article PDF or landing page link)
     self_uri_el = meta.find("self-uri")
     if self_uri_el is not None:
-        href = self_uri_el.get(
-            "{http://www.w3.org/1999/xlink}href", ""
-        )
+        href = self_uri_el.get("{http://www.w3.org/1999/xlink}href", "")
         if not href:
             href = self_uri_el.get("href", "")
         if not href:
@@ -339,9 +334,7 @@ def _parse_article_meta(root: etree._Element, doc: Document) -> None:
     counts_el = meta.find("counts")
     if counts_el is not None:
         for child in counts_el:
-            tag = etree.QName(child.tag).localname if isinstance(
-                child.tag, str
-            ) else ""
+            tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
             count_val = child.get("count", "")
             if tag and count_val:
                 try:
@@ -368,10 +361,7 @@ def _parse_keywords(root: etree._Element) -> list[str]:
                 keywords.append(kwd_text)
         # Compound keywords: <compound-kwd><compound-kwd-part>...</compound-kwd-part>
         for ckwd in kwd_group.findall("compound-kwd"):
-            parts = [
-                all_text(p) for p in ckwd.findall("compound-kwd-part")
-                if all_text(p)
-            ]
+            parts = [all_text(p) for p in ckwd.findall("compound-kwd-part") if all_text(p)]
             if parts:
                 keywords.append(" ".join(parts))
     return keywords
@@ -414,12 +404,10 @@ def _parse_abstract_content(
     def _collect_sec(sec_elem: etree._Element) -> None:
         """Recursively collect paragraphs from a ``<sec>``."""
         title_elem = sec_elem.find("title")
-        sec_title = (all_text(title_elem)
-                     if title_elem is not None else "")
+        sec_title = all_text(title_elem) if title_elem is not None else ""
         has_direct_content = False
         for child in sec_elem:
-            ctag = (etree.QName(child.tag).localname
-                    if isinstance(child.tag, str) else "")
+            ctag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
             if ctag == "p":
                 has_direct_content = True
                 para = _parse_paragraph(child)
@@ -436,9 +424,7 @@ def _parse_abstract_content(
                     for p in item.findall("p"):
                         para = _parse_paragraph(p)
                         if para.text and sec_title and first_item:
-                            para.text = (
-                                f"**{sec_title}:** {para.text}"
-                            )
+                            para.text = f"**{sec_title}:** {para.text}"
                             sec_title = ""
                             first_item = False
                         if para.text:
@@ -450,8 +436,7 @@ def _parse_abstract_content(
             pass
 
     for child in abstract_elem:
-        tag = (etree.QName(child.tag).localname
-               if isinstance(child.tag, str) else "")
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "sec":
             _collect_sec(child)
         elif tag == "p":
@@ -495,15 +480,15 @@ def _parse_secondary_abstracts(
         if title_elem is not None:
             label = all_text(title_elem)
         else:
-            label = _SECONDARY_ABSTRACT_LABELS.get(
-                ab_type, ab_type.replace("-", " ").title()
-            )
+            label = _SECONDARY_ABSTRACT_LABELS.get(ab_type, ab_type.replace("-", " ").title())
         paragraphs = _parse_abstract_content(ab)
-        results.append(SecondaryAbstract(
-            abstract_type=ab_type,
-            label=label,
-            paragraphs=paragraphs,
-        ))
+        results.append(
+            SecondaryAbstract(
+                abstract_type=ab_type,
+                label=label,
+                paragraphs=paragraphs,
+            )
+        )
 
     # Translated abstracts (<trans-abstract>)
     for tab in root.findall(".//article-meta/trans-abstract"):
@@ -515,17 +500,20 @@ def _parse_secondary_abstracts(
             label = f"Translated Abstract ({lang})" if lang else "Translated Abstract"
         paragraphs = _parse_abstract_content(tab)
         if paragraphs:
-            results.append(SecondaryAbstract(
-                abstract_type=f"trans-abstract-{lang}" if lang else "trans-abstract",
-                label=label,
-                paragraphs=paragraphs,
-            ))
+            results.append(
+                SecondaryAbstract(
+                    abstract_type=f"trans-abstract-{lang}" if lang else "trans-abstract",
+                    label=label,
+                    paragraphs=paragraphs,
+                )
+            )
 
     return results
 
 
 def _collect_inline_aff(
-    contrib: etree._Element, author: Author,
+    contrib: etree._Element,
+    author: Author,
 ) -> None:
     """Collect inline ``<aff>`` data from within a ``<contrib>``.
 
@@ -606,14 +594,10 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
                     parts.append(child.tail)
             if not parts and aff_elem.text:
                 parts.append(aff_elem.text)
-            aff_text = " ".join(
-                "".join(parts).split()
-            )
+            aff_text = " ".join("".join(parts).split())
             if aff_id and aff_text:
                 aff_map[aff_id] = aff_text
-        for contrib in front_stub.findall(
-            "contrib-group/contrib[@contrib-type='author']"
-        ):
+        for contrib in front_stub.findall("contrib-group/contrib[@contrib-type='author']"):
             author = Author()
             name_elem = contrib.find("name")
             if name_elem is not None:
@@ -677,9 +661,7 @@ def _parse_sub_article(sub_el: etree._Element) -> Document:
 def _parse_categories(root: etree._Element) -> list[str]:
     """Extract subject categories from article-categories."""
     categories: list[str] = []
-    for subj in root.findall(
-        ".//article-meta/article-categories/subj-group/subject"
-    ):
+    for subj in root.findall(".//article-meta/article-categories/subj-group/subject"):
         subj_text = all_text(subj)
         if subj_text:
             categories.append(subj_text)
@@ -764,9 +746,7 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
     if an is None:
         return notes
     for child in an:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "corresp":
             t = all_text(child)
             if t:
@@ -782,8 +762,10 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
 
 
 _COI_TITLES = {
-    "competing interests", "competing interest",
-    "conflicts of interest", "conflict of interest",
+    "competing interests",
+    "competing interest",
+    "conflicts of interest",
+    "conflict of interest",
     "conflict of interests",
 }
 
@@ -836,7 +818,8 @@ def _parse_competing_interests(root: etree._Element) -> str:
 
 
 _DATA_AVAIL_TITLES = {
-    "data availability", "data availability statement",
+    "data availability",
+    "data availability statement",
     "availability of data and materials",
     "availability of data and material",
 }
@@ -876,20 +859,16 @@ def _parse_data_availability(root: etree._Element) -> str:
                     sec_type = sec.get("sec-type", "")
                     sec_title = sec.find("title")
                     sec_title_text = (
-                        all_text(sec_title).strip().lower()
-                        if sec_title is not None else ""
+                        all_text(sec_title).strip().lower() if sec_title is not None else ""
                     )
-                    if (sec_type == "data-availability"
-                            or sec_title_text in _DATA_AVAIL_TITLES):
+                    if sec_type == "data-availability" or sec_title_text in _DATA_AVAIL_TITLES:
                         for p in sec.findall("p"):
                             p_text = all_text(p)
                             if p_text:
                                 parts.append(p_text)
     # From custom-meta-group
     if not parts:
-        for cm in root.findall(
-            ".//article-meta/custom-meta-group/custom-meta"
-        ):
+        for cm in root.findall(".//article-meta/custom-meta-group/custom-meta"):
             meta_name = cm.find("meta-name")
             meta_value = cm.find("meta-value")
             if meta_name is not None and meta_value is not None:
@@ -919,9 +898,7 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
     authors (<collab>).
     """
     authors = []
-    for contrib in root.findall(
-        ".//article-meta/contrib-group/contrib[@contrib-type='author']"
-    ):
+    for contrib in root.findall(".//article-meta/contrib-group/contrib[@contrib-type='author']"):
         author = Author()
         name_elem = contrib.find("name")
         if name_elem is not None:
@@ -938,9 +915,7 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
             author.email = text(email_elem)
 
         # ORCID — try contrib-id first, then uri
-        orcid_elem = contrib.find(
-            "contrib-id[@contrib-id-type='orcid']"
-        )
+        orcid_elem = contrib.find("contrib-id[@contrib-id-type='orcid']")
         if orcid_elem is not None:
             author.orcid = text(orcid_elem)
 
@@ -976,16 +951,19 @@ def _parse_body(root: etree._Element) -> list[Section]:
     preamble = Section(level=1)
 
     for child in body:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
 
         if tag == "sec":
             # Flush any accumulated preamble content
-            if (preamble.paragraphs or preamble.figures
-                    or preamble.tables or preamble.lists
-                    or preamble.formulas or preamble.subsections
-                    or preamble.notes):
+            if (
+                preamble.paragraphs
+                or preamble.figures
+                or preamble.tables
+                or preamble.lists
+                or preamble.formulas
+                or preamble.subsections
+                or preamble.notes
+            ):
                 sections.append(preamble)
                 preamble = Section(level=1)
             sections.append(_parse_sec(child, level=1))
@@ -1011,22 +989,36 @@ def _parse_body(root: etree._Element) -> list[Section]:
             _dispatch_group_container(child, tag, preamble, 1)
 
     # Flush trailing preamble
-    if (preamble.paragraphs or preamble.figures
-            or preamble.tables or preamble.lists
-            or preamble.formulas or preamble.subsections
-            or preamble.notes):
+    if (
+        preamble.paragraphs
+        or preamble.figures
+        or preamble.tables
+        or preamble.lists
+        or preamble.formulas
+        or preamble.subsections
+        or preamble.notes
+    ):
         sections.append(preamble)
 
     return sections
 
 
-_BLOCK_TAGS = frozenset({
-    "fig", "table-wrap", "disp-formula", "list", "graphic", "media",
-})
+_BLOCK_TAGS = frozenset(
+    {
+        "fig",
+        "table-wrap",
+        "disp-formula",
+        "list",
+        "graphic",
+        "media",
+    }
+)
 
 
 def _dispatch_sec_block(
-    child: etree._Element, tag: str, section: Section,
+    child: etree._Element,
+    tag: str,
+    section: Section,
 ) -> None:
     """Handle supplementary, boxed-text, quote, def-list, etc."""
     if tag == "supplementary-material":
@@ -1045,37 +1037,32 @@ def _dispatch_sec_block(
         # Remove duplicate bold title added by _parse_boxed_text
         if box_sec.heading and box_sec.paragraphs:
             bold_title = f"**{box_sec.heading}**"
-            box_sec.paragraphs = [
-                p for p in box_sec.paragraphs
-                if p.text != bold_title
-            ]
+            box_sec.paragraphs = [p for p in box_sec.paragraphs if p.text != bold_title]
         if (
-            box_sec.paragraphs or box_sec.subsections
-            or box_sec.lists or box_sec.figures
-            or box_sec.tables or box_sec.formulas
+            box_sec.paragraphs
+            or box_sec.subsections
+            or box_sec.lists
+            or box_sec.figures
+            or box_sec.tables
+            or box_sec.formulas
             or box_sec.notes
         ):
             section.subsections.append(box_sec)
     elif tag == "disp-quote":
         p_elems = child.findall("p")
         if p_elems:
-            lines = [f"> {all_text(p)}" for p in p_elems
-                     if all_text(p)]
+            lines = [f"> {all_text(p)}" for p in p_elems if all_text(p)]
             # Include <attrib> elements (quote attributions)
             for attrib in child.findall("attrib"):
                 attrib_text = all_text(attrib)
                 if attrib_text:
                     lines.append(f"> {attrib_text}")
             if lines:
-                section.paragraphs.append(
-                    Paragraph(text="\n".join(lines))
-                )
+                section.paragraphs.append(Paragraph(text="\n".join(lines)))
         else:
             quote_text = all_text(child)
             if quote_text:
-                section.paragraphs.append(
-                    Paragraph(text=f"> {quote_text}")
-                )
+                section.paragraphs.append(Paragraph(text=f"> {quote_text}"))
     elif tag == "def-list":
         _parse_def_list(child, section)
     elif tag == "fn-group":
@@ -1089,35 +1076,45 @@ def _dispatch_sec_block(
             ticks = re.findall(r"`+", pre_text)
             max_ticks = max((len(t) for t in ticks), default=2)
             fence = "`" * max(3, max_ticks + 1)
-            section.paragraphs.append(
-                Paragraph(text=f"{fence}\n{pre_text}\n{fence}")
-            )
+            section.paragraphs.append(Paragraph(text=f"{fence}\n{pre_text}\n{fence}"))
     elif tag == "glossary":
         _parse_glossary(child, section, emit_title=True)
 
 
-_SEC_BLOCK_TAGS = frozenset({
-    "supplementary-material", "boxed-text", "disp-quote",
-    "def-list", "fn-group", "preformat", "glossary",
-})
+_SEC_BLOCK_TAGS = frozenset(
+    {
+        "supplementary-material",
+        "boxed-text",
+        "disp-quote",
+        "def-list",
+        "fn-group",
+        "preformat",
+        "glossary",
+    }
+)
 
 # Container tags that wrap multiple figures, tables, or formulas.
-_GROUP_CONTAINER_TAGS = frozenset({
-    "fig-group", "table-wrap-group", "disp-formula-group",
-})
+_GROUP_CONTAINER_TAGS = frozenset(
+    {
+        "fig-group",
+        "table-wrap-group",
+        "disp-formula-group",
+    }
+)
 
 
 def _dispatch_group_container(
-    child: etree._Element, tag: str,
-    section: Section, level: int,
+    child: etree._Element,
+    tag: str,
+    section: Section,
+    level: int,
 ) -> None:
     """Unpack group containers into their individual elements."""
     if tag == "fig-group":
         # Capture group-level label/caption for propagation
         # to child figures that lack their own.
         grp_label_elem = child.find("label")
-        grp_label = (all_text(grp_label_elem).strip()
-                     if grp_label_elem is not None else "")
+        grp_label = all_text(grp_label_elem).strip() if grp_label_elem is not None else ""
         grp_cap_elem = child.find("caption")
         grp_caption = ""
         grp_cap_paragraphs: list[str] = []
@@ -1149,15 +1146,11 @@ def _dispatch_group_container(
             if grp_caption and not first.caption:
                 first.caption = grp_caption
                 if grp_cap_paragraphs:
-                    first.caption_paragraphs = (
-                        grp_cap_paragraphs
-                        + first.caption_paragraphs
-                    )
+                    first.caption_paragraphs = grp_cap_paragraphs + first.caption_paragraphs
             elif grp_caption and first.caption:
                 # Both have captions — combine
                 first.caption_paragraphs = (
-                    [grp_caption] + grp_cap_paragraphs
-                    + first.caption_paragraphs
+                    [grp_caption] + grp_cap_paragraphs + first.caption_paragraphs
                 )
             if grp_label and not first.label:
                 first.label = grp_label
@@ -1173,8 +1166,7 @@ def _dispatch_group_container(
     elif tag == "table-wrap-group":
         # Capture group-level label/caption for propagation
         group_label_elem = child.find("label")
-        group_label = (all_text(group_label_elem).strip()
-                       if group_label_elem is not None else "")
+        group_label = all_text(group_label_elem).strip() if group_label_elem is not None else ""
         group_cap_elem = child.find("caption")
         group_caption = ""
         if group_cap_elem is not None:
@@ -1227,8 +1219,10 @@ def _parse_speech(speech_elem: etree._Element, section: Section) -> None:
 
 
 def _dispatch_sec_child(
-    child: etree._Element, tag: str,
-    section: Section, level: int,
+    child: etree._Element,
+    tag: str,
+    section: Section,
+    level: int,
 ) -> None:
     """Handle a single child element of a <sec>."""
     if tag in ("title", "label"):
@@ -1273,9 +1267,7 @@ def _parse_sec(sec_elem: etree._Element, level: int) -> Section:
         section.heading = all_text(title_elem)
 
     for child in sec_elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         _dispatch_sec_child(child, tag, section, level)
 
     return section
@@ -1289,11 +1281,7 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
     before/after the block element is emitted as separate paragraphs, and
     the block element is added to the appropriate section list.
     """
-    child_tags = {
-        etree.QName(c.tag).localname
-        for c in p_elem
-        if isinstance(c.tag, str)
-    }
+    child_tags = {etree.QName(c.tag).localname for c in p_elem if isinstance(c.tag, str)}
     if not child_tags & _BLOCK_TAGS:
         # Fast path — no embedded blocks, just parse normally
         section.paragraphs.append(_parse_paragraph(p_elem))
@@ -1308,18 +1296,19 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
     def _flush() -> None:
         text = re.sub(r"\s+", " ", "".join(parts)).strip()
         if text:
-            section.paragraphs.append(Paragraph(
-                text=text, refs=list(refs),
-                named_content=list(annotations),
-            ))
+            section.paragraphs.append(
+                Paragraph(
+                    text=text,
+                    refs=list(refs),
+                    named_content=list(annotations),
+                )
+            )
         parts.clear()
         refs.clear()
         annotations.clear()
 
     def _collect_inline(child: etree._Element) -> None:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "xref":
             ref_text = all_text(child)
             rid = child.get("rid", "")
@@ -1328,9 +1317,7 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
                 parts.append(ref_text)
         elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
-            href = child.get(
-                "{http://www.w3.org/1999/xlink}href", ""
-            )
+            href = child.get("{http://www.w3.org/1999/xlink}href", "")
             if not href:
                 href = child.get("href", "")
             if link_text and href and link_text != href:
@@ -1352,17 +1339,13 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
             if tag in ("named-content", "styled-content") and inner:
                 ctype = child.get("content-type", "")
                 if ctype:
-                    annotations.append(
-                        NamedContent(text=inner, content_type=ctype)
-                    )
+                    annotations.append(NamedContent(text=inner, content_type=ctype))
 
     if p_elem.text:
         parts.append(p_elem.text)
 
     for child in p_elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
 
         if tag in _BLOCK_TAGS:
             _flush()
@@ -1396,9 +1379,9 @@ _INLINE_FMT: dict[str, tuple[str, str]] = {
     "monospace": ("`", "`"),
     "strike": ("~~", "~~"),
     "underline": ("<u>", "</u>"),
-    "sc": ("", ""),        # small caps — no Markdown equivalent, preserve text
+    "sc": ("", ""),  # small caps — no Markdown equivalent, preserve text
     "overline": ("", ""),  # overline — no Markdown equivalent, preserve text
-    "roman": ("", ""),     # roman type in italic context — preserve text
+    "roman": ("", ""),  # roman type in italic context — preserve text
 }
 
 
@@ -1427,9 +1410,7 @@ def _inline_text(elem: etree._Element) -> str:
     if elem.text:
         parts.append(elem.text)
     for child in elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "inline-formula":
             parts.append(_inline_formula_text(child))
         elif tag in _INLINE_FMT:
@@ -1466,9 +1447,7 @@ def _parse_paragraph(
         parts.append(p_elem.text)
 
     for child in p_elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
 
         if skip_tags and tag in skip_tags:
             # Still collect the tail text after the skipped element
@@ -1484,9 +1463,7 @@ def _parse_paragraph(
                 parts.append(ref_text)
         elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
-            href = child.get(
-                "{http://www.w3.org/1999/xlink}href", ""
-            )
+            href = child.get("{http://www.w3.org/1999/xlink}href", "")
             if not href:
                 href = child.get("href", "")
             if link_text and href and link_text != href:
@@ -1511,9 +1488,7 @@ def _parse_paragraph(
             if tag in ("named-content", "styled-content") and inner:
                 ctype = child.get("content-type", "")
                 if ctype:
-                    annotations.append(
-                        NamedContent(text=inner, content_type=ctype)
-                    )
+                    annotations.append(NamedContent(text=inner, content_type=ctype))
 
         if child.tail:
             parts.append(child.tail)
@@ -1600,8 +1575,7 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
             if title_el is not None:
                 parts.append(_inline_text(title_el).strip())
             parts.extend(
-                _inline_text(p).strip()
-                for p in abs_elem.findall("p") if _inline_text(p).strip()
+                _inline_text(p).strip() for p in abs_elem.findall("p") if _inline_text(p).strip()
             )
             if parts:
                 if fig.caption:
@@ -1628,9 +1602,7 @@ def _parse_fig(fig_elem: etree._Element) -> list[Figure]:
     graphic_elem = fig_elem.find("graphic")
     if graphic_elem is not None:
         # xlink:href attribute — try with and without namespace
-        href = graphic_elem.get(
-            "{http://www.w3.org/1999/xlink}href", ""
-        )
+        href = graphic_elem.get("{http://www.w3.org/1999/xlink}href", "")
         if not href:
             href = graphic_elem.get("href", "")
         fig.graphic_url = href
@@ -1732,9 +1704,7 @@ def _parse_standalone_graphic(graphic_elem: etree._Element) -> Figure:
     in some PMC articles.
     """
     fig = Figure()
-    href = graphic_elem.get(
-        "{http://www.w3.org/1999/xlink}href", ""
-    )
+    href = graphic_elem.get("{http://www.w3.org/1999/xlink}href", "")
     if not href:
         href = graphic_elem.get("href", "")
     fig.graphic_url = href
@@ -1758,7 +1728,8 @@ def _parse_standalone_graphic(graphic_elem: etree._Element) -> Figure:
 
 
 def _parse_media_as_paragraph(
-    media_elem: etree._Element, section: Section,
+    media_elem: etree._Element,
+    section: Section,
 ) -> None:
     """Parse a <media> element into a paragraph reference.
 
@@ -1817,8 +1788,7 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
             if title_el is not None:
                 tparts.append(_inline_text(title_el).strip())
             tparts.extend(
-                _inline_text(p).strip()
-                for p in abs_elem.findall("p") if _inline_text(p).strip()
+                _inline_text(p).strip() for p in abs_elem.findall("p") if _inline_text(p).strip()
             )
             if tparts:
                 translated = " ".join(tparts)
@@ -1837,7 +1807,8 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
         raw_spans: list[list[int]] = []
 
         def _collect_trs(
-            parent: etree._Element, is_header: bool,
+            parent: etree._Element,
+            is_header: bool,
         ) -> None:
             for tr in parent.findall("tr"):
                 cells, spans = _parse_table_row(tr, is_header=is_header)
@@ -1873,10 +1844,7 @@ def _parse_table_wrap(tw_elem: etree._Element) -> Table:
     # Process all direct children in document order to capture everything.
     for foot in tw_elem.findall("table-wrap-foot"):
         for child in foot:
-            child_tag = (
-                etree.QName(child.tag).localname
-                if isinstance(child.tag, str) else ""
-            )
+            child_tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
             if child_tag == "fn":
                 fn_text = all_text(child)
                 if fn_text:
@@ -1915,9 +1883,7 @@ def _formula_aware_text_walk(elem: etree._Element) -> str:
     if elem.text:
         parts.append(elem.text)
     for child in elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "inline-formula":
             parts.append(_inline_formula_text(child))
         else:
@@ -1928,7 +1894,8 @@ def _formula_aware_text_walk(elem: etree._Element) -> str:
 
 
 def _parse_table_row(
-    tr_elem: etree._Element, is_header: bool,
+    tr_elem: etree._Element,
+    is_header: bool,
 ) -> tuple[list[TableCell], list[int]]:
     """Parse a <tr> element into a list of TableCells and rowspan counts.
 
@@ -1940,9 +1907,7 @@ def _parse_table_row(
     cells: list[TableCell] = []
     rowspans: list[int] = []
     for child in tr_elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag in ("th", "td"):
             try:
                 rowspan = max(int(child.get("rowspan", "1") or "1"), 1)
@@ -1961,11 +1926,13 @@ def _parse_table_row(
             cells.append(cell)
             rowspans.append(rowspan)
             for _ in range(colspan - 1):
-                cells.append(TableCell(
-                    text="",
-                    is_header=(tag == "th" or is_header),
-                    align=cell_align,
-                ))
+                cells.append(
+                    TableCell(
+                        text="",
+                        is_header=(tag == "th" or is_header),
+                        align=cell_align,
+                    )
+                )
                 rowspans.append(rowspan)
     return cells, rowspans
 
@@ -1995,10 +1962,12 @@ def _expand_rowspans(
         while src_col < len(row) or out_col in pending:
             if out_col in pending:
                 remaining, orig_cell = pending[out_col]
-                expanded.append(TableCell(
-                    text="",
-                    is_header=orig_cell.is_header,
-                ))
+                expanded.append(
+                    TableCell(
+                        text="",
+                        is_header=orig_cell.is_header,
+                    )
+                )
                 if remaining > 1:
                     pending[out_col] = (remaining - 1, orig_cell)
                 else:
@@ -2033,9 +2002,9 @@ def _parse_formula(formula_elem: etree._Element) -> Formula:
     # Remove label from text — may appear at start or end
     if label:
         if formula_text.endswith(label):
-            formula_text = formula_text[:-len(label)].strip()
+            formula_text = formula_text[: -len(label)].strip()
         elif formula_text.startswith(label):
-            formula_text = formula_text[len(label):].strip()
+            formula_text = formula_text[len(label) :].strip()
 
     return Formula(text=formula_text, label=label)
 
@@ -2096,9 +2065,11 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
     for item_elem in list_elem.findall("list-item"):
         # Prepend explicit <label> if present (e.g., "1.", "a)")
         label_elem = item_elem.find("label")
-        label_prefix = all_text(label_elem).strip() + " " if (
-            label_elem is not None and all_text(label_elem).strip()
-        ) else ""
+        label_prefix = (
+            all_text(label_elem).strip() + " "
+            if (label_elem is not None and all_text(label_elem).strip())
+            else ""
+        )
         paras = item_elem.findall("p")
         if paras:
             parts = [_p_text_skip_blocks(p) for p in paras]
@@ -2127,9 +2098,7 @@ def _p_text_skip_blocks(p_elem: etree._Element) -> str:
     if p_elem.text:
         parts.append(p_elem.text)
     for child in p_elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "disp-formula":
             # Only skip content if it contains tex-math (LaTeX noise)
             if child.find(".//tex-math") is not None:
@@ -2165,9 +2134,7 @@ def _parse_supplementary(elem: etree._Element, section: Section) -> None:
         caption_text = " ".join(parts)
 
     if label and caption_text:
-        section.paragraphs.append(
-            Paragraph(text=f"**{label}.** {caption_text}")
-        )
+        section.paragraphs.append(Paragraph(text=f"**{label}.** {caption_text}"))
     elif label:
         section.paragraphs.append(Paragraph(text=f"**{label}.**"))
     elif caption_text:
@@ -2188,13 +2155,9 @@ def _parse_boxed_text(elem: etree._Element, section: Section) -> None:
     if title_elem is not None:
         title_text = all_text(title_elem)
         if title_text:
-            section.paragraphs.append(
-                Paragraph(text=f"**{title_text}**")
-            )
+            section.paragraphs.append(Paragraph(text=f"**{title_text}**"))
     for child in elem:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "p":
             _collect_from_p(child, section)
         elif tag == "list":
@@ -2236,7 +2199,8 @@ def _parse_def_list(elem: etree._Element, section: Section) -> None:
 
 
 def _parse_glossary(
-    elem: etree._Element, section: Section,
+    elem: etree._Element,
+    section: Section,
     emit_title: bool = False,
 ) -> None:
     """Parse <glossary> — def-list or paragraphs.
@@ -2254,9 +2218,7 @@ def _parse_glossary(
         if title_elem is not None:
             title_text = all_text(title_elem)
             if title_text:
-                section.paragraphs.append(
-                    Paragraph(text=f"**{title_text}**")
-                )
+                section.paragraphs.append(Paragraph(text=f"**{title_text}**"))
     for dl in elem.findall("def-list"):
         _parse_def_list(dl, section)
     for arr in elem.findall("array"):
@@ -2293,11 +2255,8 @@ def _parse_acknowledgments(
     # Check if <ack> title is a non-standard heading (e.g. COI disclosure)
     ack_title_elem = ack.find("title")
     ack_title = all_text(ack_title_elem) if ack_title_elem is not None else ""
-    _ACK_TITLES = {"acknowledgments", "acknowledgements", "acknowledgment",
-                   "acknowledgement"}
-    is_standard_ack = (
-        not ack_title or ack_title.lower().rstrip(":") in _ACK_TITLES
-    )
+    _ACK_TITLES = {"acknowledgments", "acknowledgements", "acknowledgment", "acknowledgement"}
+    is_standard_ack = not ack_title or ack_title.lower().rstrip(":") in _ACK_TITLES
 
     parts: list[str] = []
     for p in ack.findall("./p"):
@@ -2339,8 +2298,13 @@ def _parse_appendices(root: etree._Element) -> list[Section]:
     # Also handle standalone <app> directly under <back> (without app-group)
     for app in back.findall("app"):
         section = _parse_single_app(app)
-        if (section.heading or section.paragraphs or section.tables
-                or section.figures or section.subsections):
+        if (
+            section.heading
+            or section.paragraphs
+            or section.tables
+            or section.figures
+            or section.subsections
+        ):
             sections.append(section)
 
     return sections
@@ -2420,9 +2384,7 @@ def _extract_fn_paragraphs(fn: etree._Element, section: Section) -> None:
         for p in p_elems:
             p_text = all_text(p).strip()
             if p_text:
-                section.paragraphs.append(
-                    Paragraph(text=label_prefix + p_text)
-                )
+                section.paragraphs.append(Paragraph(text=label_prefix + p_text))
                 label_prefix = ""
     else:
         fn_text = all_text(fn).strip()
@@ -2452,9 +2414,7 @@ def _parse_back_sections(
         return sections
 
     for child in back:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
 
         if tag == "sec":
             sections.append(_parse_sec(child, level=1))
@@ -2475,7 +2435,8 @@ def _parse_back_sections(
                 if fn_type == "con":
                     if con_section is None:
                         con_section = Section(
-                            level=1, heading="Author Contributions",
+                            level=1,
+                            heading="Author Contributions",
                         )
                     _extract_fn_paragraphs(fn, con_section)
                     continue
@@ -2509,30 +2470,22 @@ def _parse_back_sections(
                             pre_parts.append(sib.tail.strip())
                     pre_text = " ".join(t for t in pre_parts if t)
                     if pre_text:
-                        section.paragraphs.append(
-                            Paragraph(text=pre_text)
-                        )
+                        section.paragraphs.append(Paragraph(text=pre_text))
                     # List items as separate paragraphs
                     for li in list_elem.findall("list-item"):
                         li_text = all_text(li).strip()
                         if li_text:
-                            section.paragraphs.append(
-                                Paragraph(text=li_text)
-                            )
+                            section.paragraphs.append(Paragraph(text=li_text))
                 else:
                     p_text = all_text(p)
                     if p_text:
-                        section.paragraphs.append(
-                            Paragraph(text=p_text)
-                        )
+                        section.paragraphs.append(Paragraph(text=p_text))
             # Direct <list> children (not inside <p>).
             for list_elem in child.findall("./list"):
                 for li in list_elem.findall("list-item"):
                     li_text = all_text(li).strip()
                     if li_text:
-                        section.paragraphs.append(
-                            Paragraph(text=li_text)
-                        )
+                        section.paragraphs.append(Paragraph(text=li_text))
             # Nested <notes> and <sec> children → subsections
             for sub_notes in child.findall("./notes"):
                 sub_sec = Section(level=2)
@@ -2546,9 +2499,7 @@ def _parse_back_sections(
                 if sub_sec.paragraphs or sub_sec.heading:
                     section.subsections.append(sub_sec)
             for sub_sec_elem in child.findall("./sec"):
-                section.subsections.append(
-                    _parse_sec(sub_sec_elem, level=2)
-                )
+                section.subsections.append(_parse_sec(sub_sec_elem, level=2))
             # <def-list> children (abbreviation tables, etc.)
             for dl in child.findall("./def-list"):
                 _parse_def_list(dl, section)
@@ -2559,8 +2510,7 @@ def _parse_back_sections(
                     if fn_type in _COI_FN_TYPES:
                         continue
                     _extract_fn_paragraphs(fn, section)
-            if (section.paragraphs or section.heading
-                    or section.subsections or section.lists):
+            if section.paragraphs or section.heading or section.subsections or section.lists:
                 sections.append(section)
         elif tag == "supplementary-material":
             section = Section(level=1)
@@ -2575,8 +2525,7 @@ def _parse_back_sections(
             else:
                 section.heading = "Glossary"
             _parse_glossary(child, section)
-            if (section.paragraphs or section.lists
-                    or section.heading):
+            if section.paragraphs or section.lists or section.heading:
                 sections.append(section)
         elif tag == "bio":
             section = Section(level=1)
@@ -2604,9 +2553,7 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
         return
 
     for child in floats:
-        tag = etree.QName(child.tag).localname if isinstance(
-            child.tag, str
-        ) else ""
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
 
         if tag == "fig":
             doc.figures.extend(_parse_fig(child))
@@ -2615,7 +2562,10 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             # group-level label/caption propagation.
             dummy_sec = Section(level=1)
             _dispatch_group_container(
-                child, tag, dummy_sec, 1,
+                child,
+                tag,
+                dummy_sec,
+                1,
             )
             doc.figures.extend(dummy_sec.figures)
         elif tag == "table-wrap":
@@ -2625,7 +2575,10 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             # group-level label/caption propagation.
             dummy_sec = Section(level=1)
             _dispatch_group_container(
-                child, tag, dummy_sec, 1,
+                child,
+                tag,
+                dummy_sec,
+                1,
             )
             doc.tables.extend(dummy_sec.tables)
         elif tag == "boxed-text":
@@ -2644,12 +2597,8 @@ def _parse_floats_group(root: etree._Element, doc: Document) -> None:
             # _parse_boxed_text since we already used it as heading.
             if section.heading and section.paragraphs:
                 bold_title = f"**{section.heading}**"
-                section.paragraphs = [
-                    p for p in section.paragraphs
-                    if p.text != bold_title
-                ]
-            if (section.paragraphs or section.subsections
-                    or section.lists):
+                section.paragraphs = [p for p in section.paragraphs if p.text != bold_title]
+            if section.paragraphs or section.subsections or section.lists:
                 doc.back_matter.append(section)
 
 
@@ -2688,7 +2637,8 @@ def _parse_bibliography(root: etree._Element) -> list[Reference]:
                     references.append(note_ref)
             for ref_elem in sub_rl.findall("ref"):
                 ref = _parse_ref(
-                    ref_elem, len(references) + 1,
+                    ref_elem,
+                    len(references) + 1,
                 )
                 references.append(ref)
     return references
@@ -2710,7 +2660,8 @@ def _find_citation(ref_elem: etree._Element) -> etree._Element | None:
 
 
 def _parse_ref_authors(
-    citation: etree._Element, ref: Reference,
+    citation: etree._Element,
+    ref: Reference,
 ) -> None:
     """Extract authors from a citation element into *ref*."""
     # Try person-group with type="author" first, then untyped groups,
@@ -2751,12 +2702,11 @@ def _parse_ref_authors(
 
 
 def _parse_ref_editors(
-    citation: etree._Element, ref: Reference,
+    citation: etree._Element,
+    ref: Reference,
 ) -> None:
     """Extract editors from a citation element into *ref*."""
-    editor_group = citation.find(
-        "person-group[@person-group-type='editor']"
-    )
+    editor_group = citation.find("person-group[@person-group-type='editor']")
     if editor_group is None:
         return
     for name_elem in editor_group.findall("name"):
@@ -2768,7 +2718,8 @@ def _parse_ref_editors(
 
 
 def _parse_ref_pages(
-    citation: etree._Element, ref: Reference,
+    citation: etree._Element,
+    ref: Reference,
 ) -> None:
     """Extract page range or elocation-id from a citation."""
     fpage = citation.find("fpage")
@@ -2791,20 +2742,21 @@ def _parse_ref_pages(
 
 
 def _parse_ref_ids(
-    citation: etree._Element, ref: Reference,
+    citation: etree._Element,
+    ref: Reference,
 ) -> None:
     """Extract identifiers and external links from a citation."""
     for pub_id_type, attr in (
-        ("doi", "doi"), ("pmid", "pmid"), ("pmcid", "pmcid"),
+        ("doi", "doi"),
+        ("pmid", "pmid"),
+        ("pmcid", "pmcid"),
     ):
         elem = citation.find(f"pub-id[@pub-id-type='{pub_id_type}']")
         if elem is not None:
             setattr(ref, attr, text(elem))
 
     for ext_link in citation.findall("ext-link"):
-        href = ext_link.get(
-            "{http://www.w3.org/1999/xlink}href", ""
-        )
+        href = ext_link.get("{http://www.w3.org/1999/xlink}href", "")
         if not href:
             href = ext_link.get("href", "")
         if href:
@@ -2812,9 +2764,7 @@ def _parse_ref_ids(
 
     # <uri> elements (URLs not wrapped in ext-link)
     for uri_elem in citation.findall("uri"):
-        href = uri_elem.get(
-            "{http://www.w3.org/1999/xlink}href", ""
-        )
+        href = uri_elem.get("{http://www.w3.org/1999/xlink}href", "")
         if not href:
             href = uri_elem.get("href", "")
         if not href:
@@ -2838,9 +2788,7 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
         note = ref_elem.find("note")
         if note is not None:
             note_p = note.find("p")
-            note_text = all_text(note_p) if note_p is not None else (
-                all_text(note)
-            )
+            note_text = all_text(note_p) if note_p is not None else (all_text(note))
             if note_text:
                 ref.comment = note_text
         return ref
@@ -2868,8 +2816,7 @@ def _parse_ref(ref_elem: etree._Element, index: int) -> Reference:
         ref.chapter_title = all_text(part_title)
 
     # Simple text fields
-    for tag, attr in (("year", "year"), ("volume", "volume"),
-                      ("issue", "issue")):
+    for tag, attr in (("year", "year"), ("volume", "volume"), ("issue", "issue")):
         elem = citation.find(tag)
         if elem is not None:
             setattr(ref, attr, text(elem))

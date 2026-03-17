@@ -1,4 +1,5 @@
 """Tests for Markdown reader (md_reader.py)."""
+
 from agr_abc_document_parsers.md_emitter import emit_markdown
 from agr_abc_document_parsers.md_reader import (
     load_document_with_supplements,
@@ -116,12 +117,7 @@ class TestReadMarkdownBasic:
         assert fig.caption == ""
 
     def test_tables_gfm(self):
-        md = (
-            "## Results\n\n"
-            "| Gene | Expression |\n"
-            "|---|---|\n"
-            "| BRCA1 | 2.5 |\n"
-        )
+        md = "## Results\n\n| Gene | Expression |\n|---|---|\n| BRCA1 | 2.5 |\n"
         doc = read_markdown(md)
         assert len(doc.sections[0].tables) == 1
         table = doc.sections[0].tables[0]
@@ -132,13 +128,7 @@ class TestReadMarkdownBasic:
         assert table.rows[1][0].is_header is False
 
     def test_table_with_caption(self):
-        md = (
-            "## Results\n\n"
-            "| A | B |\n"
-            "|---|---|\n"
-            "| 1 | 2 |\n\n"
-            "**Table 1.** Summary.\n"
-        )
+        md = "## Results\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n**Table 1.** Summary.\n"
         doc = read_markdown(md)
         table = doc.sections[0].tables[0]
         assert table.label == "Table 1"
@@ -265,12 +255,7 @@ class TestReadMarkdownBasic:
         assert doc.back_matter[0].paragraphs[0].text == "Extra content."
 
     def test_escaped_pipe_in_table(self):
-        md = (
-            "## Results\n\n"
-            "| Gene | Notes |\n"
-            "|---|---|\n"
-            "| BRCA1 | see ref \\| note |\n"
-        )
+        md = "## Results\n\n| Gene | Notes |\n|---|---|\n| BRCA1 | see ref \\| note |\n"
         doc = read_markdown(md)
         table = doc.sections[0].tables[0]
         assert table.rows[1][0].text == "BRCA1"
@@ -324,7 +309,8 @@ class TestReadMarkdownSupplements:
         supp2_md = "## Supplementary Tables\n\n| A |\n|---|\n| 1 |\n"
 
         doc = load_document_with_supplements(
-            main_md, [supp1_md, supp2_md],
+            main_md,
+            [supp1_md, supp2_md],
         )
         assert doc.title == "Main Paper"
         assert len(doc.supplements) == 2
@@ -357,193 +343,301 @@ class TestRoundTrip:
         md1 = emit_markdown(doc)
         doc2 = read_markdown(md1)
         md2 = emit_markdown(doc2)
-        assert md1 == md2, f"Round-trip failed.\n--- Original ---\n{md1}\n--- Round-tripped ---\n{md2}"
+        assert md1 == md2, (
+            f"Round-trip failed.\n--- Original ---\n{md1}\n--- Round-tripped ---\n{md2}"
+        )
 
     def test_round_trip_title_only(self):
         self._assert_round_trip(_make_doc(title="My Paper"))
 
     def test_round_trip_title_and_authors(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper Title",
-            authors=[
-                Author(given_name="Alice", surname="Smith"),
-                Author(given_name="Bob", surname="Jones"),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper Title",
+                authors=[
+                    Author(given_name="Alice", surname="Smith"),
+                    Author(given_name="Bob", surname="Jones"),
+                ],
+            )
+        )
 
     def test_round_trip_abstract(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            abstract=[
-                Paragraph(text="First abstract paragraph."),
-                Paragraph(text="Second abstract paragraph."),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                abstract=[
+                    Paragraph(text="First abstract paragraph."),
+                    Paragraph(text="Second abstract paragraph."),
+                ],
+            )
+        )
 
     def test_round_trip_keywords(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            abstract=[Paragraph(text="Abstract.")],
-            keywords=["gene expression", "RNA-seq", "transcriptomics"],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                abstract=[Paragraph(text="Abstract.")],
+                keywords=["gene expression", "RNA-seq", "transcriptomics"],
+            )
+        )
 
     def test_round_trip_sections(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Introduction", paragraphs=[
-                    Paragraph(text="Intro text."),
-                ]),
-                Section(heading="Methods", paragraphs=[
-                    Paragraph(text="Methods text."),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Introduction",
+                        paragraphs=[
+                            Paragraph(text="Intro text."),
+                        ],
+                    ),
+                    Section(
+                        heading="Methods",
+                        paragraphs=[
+                            Paragraph(text="Methods text."),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_nested_sections(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Methods", subsections=[
-                    Section(heading="Samples", paragraphs=[
-                        Paragraph(text="Sample text."),
-                    ], subsections=[
-                        Section(heading="RNA extraction", paragraphs=[
-                            Paragraph(text="RNA text."),
-                        ]),
-                    ]),
-                    Section(heading="Analysis", paragraphs=[
-                        Paragraph(text="Analysis text."),
-                    ]),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Methods",
+                        subsections=[
+                            Section(
+                                heading="Samples",
+                                paragraphs=[
+                                    Paragraph(text="Sample text."),
+                                ],
+                                subsections=[
+                                    Section(
+                                        heading="RNA extraction",
+                                        paragraphs=[
+                                            Paragraph(text="RNA text."),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                            Section(
+                                heading="Analysis",
+                                paragraphs=[
+                                    Paragraph(text="Analysis text."),
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_figures(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Results", figures=[
-                    Figure(label="Figure 1", caption="Expression levels."),
-                    Figure(label="Figure 2", caption="Protein levels."),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Results",
+                        figures=[
+                            Figure(label="Figure 1", caption="Expression levels."),
+                            Figure(label="Figure 2", caption="Protein levels."),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_tables(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Results", tables=[
-                    Table(label="Table 1", caption="Summary.", rows=[
-                        [TableCell(text="Gene", is_header=True),
-                         TableCell(text="Expr", is_header=True)],
-                        [TableCell(text="BRCA1"), TableCell(text="2.5")],
-                    ]),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Results",
+                        tables=[
+                            Table(
+                                label="Table 1",
+                                caption="Summary.",
+                                rows=[
+                                    [
+                                        TableCell(text="Gene", is_header=True),
+                                        TableCell(text="Expr", is_header=True),
+                                    ],
+                                    [TableCell(text="BRCA1"), TableCell(text="2.5")],
+                                ],
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_table_with_footnotes(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Results", tables=[
-                    Table(label="Table 1", caption="Summary.", rows=[
-                        [TableCell(text="A", is_header=True),
-                         TableCell(text="B", is_header=True)],
-                        [TableCell(text="1"), TableCell(text="2")],
-                    ], foot_notes=["FC, fold change.", "*P < 0.05."]),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Results",
+                        tables=[
+                            Table(
+                                label="Table 1",
+                                caption="Summary.",
+                                rows=[
+                                    [
+                                        TableCell(text="A", is_header=True),
+                                        TableCell(text="B", is_header=True),
+                                    ],
+                                    [TableCell(text="1"), TableCell(text="2")],
+                                ],
+                                foot_notes=["FC, fold change.", "*P < 0.05."],
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_lists(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Methods", lists=[
-                    ListBlock(items=["Step one", "Step two"], ordered=False),
-                    ListBlock(items=["First", "Second"], ordered=True),
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Methods",
+                        lists=[
+                            ListBlock(items=["Step one", "Step two"], ordered=False),
+                            ListBlock(items=["First", "Second"], ordered=True),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_footnotes(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[
-                Section(heading="Discussion", notes=[
-                    "Additional details.",
-                    "See supplementary.",
-                ]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Discussion",
+                        notes=[
+                            "Additional details.",
+                            "See supplementary.",
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_acknowledgments(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            acknowledgments="We thank the NIH.",
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                acknowledgments="We thank the NIH.",
+            )
+        )
 
     def test_round_trip_references(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            references=[
-                Reference(index=1, authors=["Lee C", "Park D"],
-                          title="Genomic analysis of expression",
-                          journal="Nature Genetics", volume="52", issue="3",
-                          pages="100-110", year="2020",
-                          doi="10.1038/ng.2020"),
-                Reference(index=2, authors=["Wang E"],
-                          title="RNA-seq best practices",
-                          journal="Bioinformatics", volume="36",
-                          pages="200-215", year="2019"),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                references=[
+                    Reference(
+                        index=1,
+                        authors=["Lee C", "Park D"],
+                        title="Genomic analysis of expression",
+                        journal="Nature Genetics",
+                        volume="52",
+                        issue="3",
+                        pages="100-110",
+                        year="2020",
+                        doi="10.1038/ng.2020",
+                    ),
+                    Reference(
+                        index=2,
+                        authors=["Wang E"],
+                        title="RNA-seq best practices",
+                        journal="Bioinformatics",
+                        volume="36",
+                        pages="200-215",
+                        year="2019",
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_reference_with_ids(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            references=[
-                Reference(index=1, authors=["Doe J"],
-                          title="Test paper", journal="PLOS ONE",
-                          year="2024", doi="10.1234/test",
-                          pmid="11111111", pmcid="PMC9999999",
-                          ext_links=["https://example.com/data"]),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                references=[
+                    Reference(
+                        index=1,
+                        authors=["Doe J"],
+                        title="Test paper",
+                        journal="PLOS ONE",
+                        year="2024",
+                        doi="10.1234/test",
+                        pmid="11111111",
+                        pmcid="PMC9999999",
+                        ext_links=["https://example.com/data"],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_reference_with_editors_publisher(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            references=[
-                Reference(
-                    index=1, authors=["Auth A"],
-                    title="Book chapter title",
-                    chapter_title="Part One",
-                    editors=["Editor E"],
-                    journal="Big Book",
-                    publisher="Academic Press",
-                    publisher_loc="New York",
-                    year="2023",
-                ),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                references=[
+                    Reference(
+                        index=1,
+                        authors=["Auth A"],
+                        title="Book chapter title",
+                        chapter_title="Part One",
+                        editors=["Editor E"],
+                        journal="Big Book",
+                        publisher="Academic Press",
+                        publisher_loc="New York",
+                        year="2023",
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_back_matter(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            sections=[Section(heading="Introduction", paragraphs=[
-                Paragraph(text="Text."),
-            ])],
-            acknowledgments="Thanks.",
-            back_matter=[Section(heading="Funding", paragraphs=[
-                Paragraph(text="NIH grant."),
-            ])],
-            references=[Reference(index=1, authors=["A B"],
-                                  title="T", journal="J", year="2024")],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                sections=[
+                    Section(
+                        heading="Introduction",
+                        paragraphs=[
+                            Paragraph(text="Text."),
+                        ],
+                    )
+                ],
+                acknowledgments="Thanks.",
+                back_matter=[
+                    Section(
+                        heading="Funding",
+                        paragraphs=[
+                            Paragraph(text="NIH grant."),
+                        ],
+                    )
+                ],
+                references=[
+                    Reference(index=1, authors=["A B"], title="T", journal="J", year="2024")
+                ],
+            )
+        )
 
     def test_round_trip_full_document(self):
         """Full document with all elements."""
@@ -556,34 +650,45 @@ class TestRoundTrip:
             abstract=[Paragraph(text="This study examines gene expression.")],
             keywords=["gene expression", "RNA-seq"],
             sections=[
-                Section(heading="Introduction",
-                        paragraphs=[Paragraph(text="Intro text here.")]),
-                Section(heading="Methods",
-                        paragraphs=[Paragraph(text="Methods text here.")],
-                        lists=[
-                            ListBlock(items=["Step one", "Step two"],
-                                      ordered=False),
-                        ]),
-                Section(heading="Results",
-                        paragraphs=[Paragraph(text="Results text.")],
-                        figures=[
-                            Figure(label="Figure 1",
-                                   caption="Expression levels."),
-                        ],
-                        tables=[
-                            Table(label="Table 1", caption="Summary.", rows=[
-                                [TableCell(text="Gene", is_header=True),
-                                 TableCell(text="Expr", is_header=True)],
-                                [TableCell(text="BRCA1"),
-                                 TableCell(text="2.5")],
-                            ]),
-                        ]),
+                Section(heading="Introduction", paragraphs=[Paragraph(text="Intro text here.")]),
+                Section(
+                    heading="Methods",
+                    paragraphs=[Paragraph(text="Methods text here.")],
+                    lists=[
+                        ListBlock(items=["Step one", "Step two"], ordered=False),
+                    ],
+                ),
+                Section(
+                    heading="Results",
+                    paragraphs=[Paragraph(text="Results text.")],
+                    figures=[
+                        Figure(label="Figure 1", caption="Expression levels."),
+                    ],
+                    tables=[
+                        Table(
+                            label="Table 1",
+                            caption="Summary.",
+                            rows=[
+                                [
+                                    TableCell(text="Gene", is_header=True),
+                                    TableCell(text="Expr", is_header=True),
+                                ],
+                                [TableCell(text="BRCA1"), TableCell(text="2.5")],
+                            ],
+                        ),
+                    ],
+                ),
             ],
             acknowledgments="We thank the NIH.",
             references=[
-                Reference(index=1, authors=["Lee C"],
-                          title="Ref title", journal="Nature",
-                          volume="1", year="2020"),
+                Reference(
+                    index=1,
+                    authors=["Lee C"],
+                    title="Ref title",
+                    journal="Nature",
+                    volume="1",
+                    year="2020",
+                ),
             ],
         )
         self._assert_round_trip(doc)
@@ -730,10 +835,7 @@ class TestReadMarkdownNewFeatures:
         assert doc.authors[1].roles == ["Investigation"]
 
     def test_no_sub_articles_when_none(self):
-        md = (
-            "# Title\n\n"
-            "## References\n\n1. Ref (2024) T. *J*.\n"
-        )
+        md = "# Title\n\n## References\n\n1. Ref (2024) T. *J*.\n"
         doc = read_markdown(md)
         assert doc.sub_articles == []
 
@@ -751,126 +853,154 @@ class TestRoundTripNewFeatures:
         doc2 = read_markdown(md1)
         md2 = emit_markdown(doc2)
         assert md1 == md2, (
-            f"Round-trip failed.\n--- Original ---\n{md1}\n"
-            f"--- Round-tripped ---\n{md2}"
+            f"Round-trip failed.\n--- Original ---\n{md1}\n--- Round-tripped ---\n{md2}"
         )
 
     def test_round_trip_categories(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            categories=["Research Article", "Cell Biology"],
-            authors=[Author(given_name="A", surname="B")],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                categories=["Research Article", "Cell Biology"],
+                authors=[Author(given_name="A", surname="B")],
+            )
+        )
 
     def test_round_trip_secondary_abstracts(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            abstract=[Paragraph(text="Main abstract.")],
-            secondary_abstracts=[
-                SecondaryAbstract(
-                    abstract_type="summary",
-                    label="Author Summary",
-                    paragraphs=[Paragraph(text="Author summary text.")],
-                ),
-                SecondaryAbstract(
-                    abstract_type="executive-summary",
-                    label="eLife Digest",
-                    paragraphs=[
-                        Paragraph(text="Digest paragraph one."),
-                        Paragraph(text="Digest paragraph two."),
-                    ],
-                ),
-            ],
-            keywords=["kw1"],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                abstract=[Paragraph(text="Main abstract.")],
+                secondary_abstracts=[
+                    SecondaryAbstract(
+                        abstract_type="summary",
+                        label="Author Summary",
+                        paragraphs=[Paragraph(text="Author summary text.")],
+                    ),
+                    SecondaryAbstract(
+                        abstract_type="executive-summary",
+                        label="eLife Digest",
+                        paragraphs=[
+                            Paragraph(text="Digest paragraph one."),
+                            Paragraph(text="Digest paragraph two."),
+                        ],
+                    ),
+                ],
+                keywords=["kw1"],
+            )
+        )
 
     def test_round_trip_sub_articles(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            references=[
-                Reference(index=1, authors=["A B"], title="T",
-                          journal="J", year="2024"),
-            ],
-            sub_articles=[
-                Document(
-                    title="Decision letter",
-                    authors=[Author(given_name="Pat", surname="Wittkopp")],
-                    sections=[Section(heading="Summary", paragraphs=[
-                        Paragraph(text="Interesting paper."),
-                    ])],
-                ),
-                Document(
-                    title="Author response",
-                    sections=[Section(paragraphs=[
-                        Paragraph(text="We thank the reviewers."),
-                    ])],
-                    references=[
-                        Reference(index=1, authors=["X Y"], title="Sub ref",
-                                  journal="J2", year="2023"),
-                    ],
-                ),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                references=[
+                    Reference(index=1, authors=["A B"], title="T", journal="J", year="2024"),
+                ],
+                sub_articles=[
+                    Document(
+                        title="Decision letter",
+                        authors=[Author(given_name="Pat", surname="Wittkopp")],
+                        sections=[
+                            Section(
+                                heading="Summary",
+                                paragraphs=[
+                                    Paragraph(text="Interesting paper."),
+                                ],
+                            )
+                        ],
+                    ),
+                    Document(
+                        title="Author response",
+                        sections=[
+                            Section(
+                                paragraphs=[
+                                    Paragraph(text="We thank the reviewers."),
+                                ]
+                            )
+                        ],
+                        references=[
+                            Reference(
+                                index=1, authors=["X Y"], title="Sub ref", journal="J2", year="2023"
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        )
 
     def test_round_trip_author_roles(self):
-        self._assert_round_trip(_make_doc(
-            title="Paper",
-            authors=[
-                Author(given_name="Rachel", surname="Waymack",
-                       roles=["Conceptualization", "Software"]),
-                Author(given_name="Alvaro", surname="Fletcher",
-                       roles=["Investigation"]),
-            ],
-            references=[
-                Reference(index=1, authors=["A B"], title="T",
-                          journal="J", year="2024"),
-            ],
-        ))
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper",
+                authors=[
+                    Author(
+                        given_name="Rachel",
+                        surname="Waymack",
+                        roles=["Conceptualization", "Software"],
+                    ),
+                    Author(given_name="Alvaro", surname="Fletcher", roles=["Investigation"]),
+                ],
+                references=[
+                    Reference(index=1, authors=["A B"], title="T", journal="J", year="2024"),
+                ],
+            )
+        )
 
     def test_round_trip_full_with_all_new_features(self):
         """Full document with all new features."""
-        self._assert_round_trip(Document(
-            title="A Study",
-            categories=["Research Article", "Genetics"],
-            authors=[
-                Author(given_name="Alice", surname="Smith",
-                       roles=["Conceptualization"]),
-                Author(given_name="Bob", surname="Jones"),
-            ],
-            abstract=[Paragraph(text="Main abstract.")],
-            secondary_abstracts=[
-                SecondaryAbstract(
-                    abstract_type="summary",
-                    label="Author Summary",
-                    paragraphs=[Paragraph(text="Summary text.")],
-                ),
-            ],
-            keywords=["gene expression"],
-            sections=[
-                Section(heading="Introduction",
-                        paragraphs=[Paragraph(text="Intro.")]),
-            ],
-            acknowledgments="Thanks.",
-            funding=[
-                FundingEntry(funder="NIH", award_ids=["R01GM12345"]),
-            ],
-            funding_statement="Supported by NIH.",
-            author_notes=["Corresponding author: a@b.edu"],
-            competing_interests="No competing interests.",
-            data_availability="Data at GEO.",
-            references=[
-                Reference(index=1, authors=["Lee C"], title="Ref",
-                          journal="Nature", volume="1", year="2020"),
-            ],
-            sub_articles=[
-                Document(
-                    title="Decision letter",
-                    sections=[Section(heading="Review", paragraphs=[
-                        Paragraph(text="Good work."),
-                    ])],
-                ),
-            ],
-        ))
+        self._assert_round_trip(
+            Document(
+                title="A Study",
+                categories=["Research Article", "Genetics"],
+                authors=[
+                    Author(given_name="Alice", surname="Smith", roles=["Conceptualization"]),
+                    Author(given_name="Bob", surname="Jones"),
+                ],
+                abstract=[Paragraph(text="Main abstract.")],
+                secondary_abstracts=[
+                    SecondaryAbstract(
+                        abstract_type="summary",
+                        label="Author Summary",
+                        paragraphs=[Paragraph(text="Summary text.")],
+                    ),
+                ],
+                keywords=["gene expression"],
+                sections=[
+                    Section(heading="Introduction", paragraphs=[Paragraph(text="Intro.")]),
+                ],
+                acknowledgments="Thanks.",
+                funding=[
+                    FundingEntry(funder="NIH", award_ids=["R01GM12345"]),
+                ],
+                funding_statement="Supported by NIH.",
+                author_notes=["Corresponding author: a@b.edu"],
+                competing_interests="No competing interests.",
+                data_availability="Data at GEO.",
+                references=[
+                    Reference(
+                        index=1,
+                        authors=["Lee C"],
+                        title="Ref",
+                        journal="Nature",
+                        volume="1",
+                        year="2020",
+                    ),
+                ],
+                sub_articles=[
+                    Document(
+                        title="Decision letter",
+                        sections=[
+                            Section(
+                                heading="Review",
+                                paragraphs=[
+                                    Paragraph(text="Good work."),
+                                ],
+                            )
+                        ],
+                    ),
+                ],
+            )
+        )
 
 
 class TestReadMarkdownNewFields:
@@ -893,11 +1023,7 @@ class TestReadMarkdownNewFields:
         assert doc.funding_statement == "This work was supported by grants."
 
     def test_read_funding_statement_only(self):
-        md = (
-            "# Paper\n\n"
-            "## Funding\n\n"
-            "This work was supported by the NIH.\n"
-        )
+        md = "# Paper\n\n## Funding\n\nThis work was supported by the NIH.\n"
         doc = read_markdown(md)
         assert not doc.funding
         assert doc.funding_statement == "This work was supported by the NIH."
@@ -915,20 +1041,12 @@ class TestReadMarkdownNewFields:
         assert "contributed equally" in doc.author_notes[1]
 
     def test_read_competing_interests(self):
-        md = (
-            "# Paper\n\n"
-            "## Competing Interests\n\n"
-            "The authors declare no competing interests.\n"
-        )
+        md = "# Paper\n\n## Competing Interests\n\nThe authors declare no competing interests.\n"
         doc = read_markdown(md)
         assert doc.competing_interests == "The authors declare no competing interests."
 
     def test_read_data_availability(self):
-        md = (
-            "# Paper\n\n"
-            "## Data Availability\n\n"
-            "All data at https://example.com.\n"
-        )
+        md = "# Paper\n\n## Data Availability\n\nAll data at https://example.com.\n"
         doc = read_markdown(md)
         assert doc.data_availability == "All data at https://example.com."
 
@@ -959,8 +1077,7 @@ class TestReadMarkdownNewFields:
             author_notes=["Corresponding: a@b.edu"],
             competing_interests="None declared.",
             data_availability="Data at GEO.",
-            references=[Reference(index=1, authors=["A B"],
-                                  title="T", journal="J", year="2024")],
+            references=[Reference(index=1, authors=["A B"], title="T", journal="J", year="2024")],
         )
         md1 = emit_markdown(doc)
         doc2 = read_markdown(md1)

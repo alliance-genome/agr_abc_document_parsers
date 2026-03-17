@@ -1,4 +1,5 @@
 """Parse ABC-format Markdown back into a Document model."""
+
 from __future__ import annotations
 
 import re
@@ -80,7 +81,13 @@ def read_markdown(text: str) -> Document:
 
     # --- Metadata lines (**Key:** value) ---
     _META_KEYS = {
-        "Journal", "DOI", "PMID", "PMCID", "Citation", "Published", "License",
+        "Journal",
+        "DOI",
+        "PMID",
+        "PMCID",
+        "Citation",
+        "Published",
+        "License",
     }
     while pos < n:
         m = _META_RE.match(lines[pos])
@@ -95,9 +102,7 @@ def read_markdown(text: str) -> Document:
     if pos < n and _CATEGORIES_RE.match(lines[pos]):
         m_cat = _CATEGORIES_RE.match(lines[pos])
         if m_cat:
-            doc.categories = [
-                c.strip() for c in m_cat.group(1).split(",") if c.strip()
-            ]
+            doc.categories = [c.strip() for c in m_cat.group(1).split(",") if c.strip()]
         pos += 1
         pos = _skip_blank(lines, pos, n)
 
@@ -138,8 +143,13 @@ def read_markdown(text: str) -> Document:
         pos += 1
     if preamble_lines:
         section = _parse_section_lines("", preamble_lines, 2)
-        if (section.paragraphs or section.figures or section.tables
-                or section.lists or section.notes):
+        if (
+            section.paragraphs
+            or section.figures
+            or section.tables
+            or section.lists
+            or section.notes
+        ):
             doc.sections.append(section)
 
     # --- Split main article from sub-articles at --- separators ---
@@ -151,8 +161,10 @@ def read_markdown(text: str) -> Document:
 
     # Known secondary abstract labels
     _SECONDARY_LABELS = {
-        "Author Summary", "eLife Digest",
-        "Table of Contents Summary", "Plain Language Summary",
+        "Author Summary",
+        "eLife Digest",
+        "Table of Contents Summary",
+        "Plain Language Summary",
     }
 
     found_ack = False
@@ -162,22 +174,13 @@ def read_markdown(text: str) -> Document:
             doc.abstract, kw = _parse_abstract_lines(content_lines)
             if kw and not doc.keywords:
                 doc.keywords = kw
-        elif (
-            heading in _SECONDARY_LABELS
-            and not found_ack
-            and not found_ref
-        ):
+        elif heading in _SECONDARY_LABELS and not found_ack and not found_ref:
             # Extract keywords that may be embedded in this block
             for cl in content_lines:
                 m_kw = _KEYWORDS_RE.match(cl)
                 if m_kw and not doc.keywords:
-                    doc.keywords = [
-                        k.strip() for k in m_kw.group(1).split(",")
-                        if k.strip()
-                    ]
-            doc.secondary_abstracts.append(
-                _parse_secondary_abstract(heading, content_lines)
-            )
+                    doc.keywords = [k.strip() for k in m_kw.group(1).split(",") if k.strip()]
+            doc.secondary_abstracts.append(_parse_secondary_abstract(heading, content_lines))
         elif heading == "Acknowledgments":
             doc.acknowledgments = _parse_acknowledgments_lines(content_lines)
             found_ack = True
@@ -239,7 +242,9 @@ def load_document_with_supplements(
 
 
 def _split_sub_articles(
-    lines: list[str], start: int, end: int,
+    lines: list[str],
+    start: int,
+    end: int,
 ) -> tuple[list[str], list[list[str]]]:
     """Split document lines into main-article lines and sub-article chunks.
 
@@ -276,7 +281,7 @@ def _split_sub_articles(
     if not sub_starts:
         return lines[:end], []
 
-    main_lines = lines[:sub_starts[0]]
+    main_lines = lines[: sub_starts[0]]
     # Strip trailing blank lines from main
     while main_lines and not main_lines[-1].strip():
         main_lines.pop()
@@ -301,10 +306,7 @@ def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
     pos = _skip_blank(chunk_lines, pos, n)
 
     # Optional DOI line before title (e.g. "DOI: 10.7554/eLife.82952.sa0")
-    if (
-        pos < n
-        and chunk_lines[pos].startswith("DOI: ")
-    ):
+    if pos < n and chunk_lines[pos].startswith("DOI: "):
         doc.doi = chunk_lines[pos][5:].strip()
         pos += 1
         pos = _skip_blank(chunk_lines, pos, n)
@@ -377,7 +379,8 @@ def _parse_sub_article_chunk(chunk_lines: list[str]) -> Document:
 
 
 def _parse_secondary_abstract(
-    heading: str, content_lines: list[str],
+    heading: str,
+    content_lines: list[str],
 ) -> SecondaryAbstract:
     """Parse a secondary abstract H2 block into a SecondaryAbstract."""
     _LABEL_TO_TYPE = {
@@ -403,7 +406,10 @@ def _parse_secondary_abstract(
 
 
 def _parse_role_footnotes(
-    lines: list[str], start: int, end: int, doc: Document,
+    lines: list[str],
+    start: int,
+    end: int,
+    doc: Document,
 ) -> None:
     """Parse author role footnotes back into Author.roles.
 
@@ -525,7 +531,9 @@ def _parse_keywords(line: str) -> list[str]:
 
 
 def _collect_h2_blocks(
-    lines: list[str], start: int, end: int,
+    lines: list[str],
+    start: int,
+    end: int,
 ) -> list[tuple[str, list[str], bool]]:
     """Collect H2 sections as (heading_text, content_lines, is_boxed).
 
@@ -552,7 +560,7 @@ def _collect_h2_blocks(
             for fi, fl in enumerate(fence_lines):
                 if _heading_level(fl) == 2:
                     heading = _heading_text(fl)
-                    content = fence_lines[fi + 1:]
+                    content = fence_lines[fi + 1 :]
                     blocks.append((heading, content, True))
                     break
             else:
@@ -568,10 +576,7 @@ def _collect_h2_blocks(
                 # headings inside them don't break the block.
                 if lines[pos].strip().startswith("::: "):
                     pos += 1
-                    while (
-                        pos < end
-                        and not lines[pos].strip().startswith(":::")
-                    ):
+                    while pos < end and not lines[pos].strip().startswith(":::"):
                         pos += 1
                     if pos < end:
                         pos += 1  # skip closing :::
@@ -809,7 +814,8 @@ def _parse_title_chapter_editors(text: str, ref: Reference) -> None:
 
 
 def _parse_ref_source(
-    text: str, ref: Reference,
+    text: str,
+    ref: Reference,
     italic_matches: list[re.Match[str]],  # type: ignore[type-arg]
     offset: int,
 ) -> None:
@@ -821,7 +827,7 @@ def _parse_ref_source(
     if not m_italic:
         return
     ref.journal = m_italic.group(1)
-    remaining = remaining[m_italic.end():]
+    remaining = remaining[m_italic.end() :]
 
     # Parse volume, issue, pages after journal
     remaining = _parse_journal_details(remaining, ref)
@@ -831,7 +837,7 @@ def _parse_ref_source(
     m_conf = _REF_ITALIC_RE.match(remaining)
     if m_conf:
         ref.conference = m_conf.group(1)
-        remaining = remaining[m_conf.end():].lstrip(".").strip()
+        remaining = remaining[m_conf.end() :].lstrip(".").strip()
 
     # Remaining: publisher
     _parse_publisher(remaining, ref)
@@ -854,7 +860,7 @@ def _parse_journal_details(text: str, ref: Reference) -> str:
         return ""
 
     parts_str = inner[:dot_pos]
-    remaining = inner[dot_pos + 1:]
+    remaining = inner[dot_pos + 1 :]
 
     # Split by ", " to get vol/pages parts
     parts = [p.strip() for p in parts_str.split(",") if p.strip()]
@@ -896,7 +902,9 @@ def _parse_publisher(text: str, ref: Reference) -> None:
 
 
 def _parse_section_lines(
-    heading: str, content_lines: list[str], heading_level: int,
+    heading: str,
+    content_lines: list[str],
+    heading_level: int,
 ) -> Section:
     """Parse section content lines into a Section object."""
     section = Section(heading=heading, level=max(1, heading_level - 1))
@@ -935,10 +943,11 @@ def _parse_section_lines(
                 hl = _heading_level(bl)
                 if hl > 0:
                     box_heading = _heading_text(bl)
-                    box_content = box_lines[bi + 1:]
+                    box_content = box_lines[bi + 1 :]
                     break
             box_section = _parse_section_lines(
-                box_heading, box_content,
+                box_heading,
+                box_content,
                 heading_level + 1,
             )
             box_section.is_boxed = True
@@ -968,7 +977,9 @@ def _parse_section_lines(
                     break
                 i += 1
             sub_section = _parse_section_lines(
-                sub_heading, content_lines[sub_start:i], hlevel,
+                sub_heading,
+                content_lines[sub_start:i],
+                hlevel,
             )
             section.subsections.append(sub_section)
             last_table = None
@@ -999,11 +1010,7 @@ def _parse_section_lines(
                 # Table caption — attach to preceding table with rows,
                 # but only if it doesn't already have a label (avoid
                 # overwriting when consecutive captions follow a table).
-                if (
-                    last_table is not None
-                    and last_table.rows
-                    and not last_table.label
-                ):
+                if last_table is not None and last_table.rows and not last_table.label:
                     last_table.label = label
                     last_table.caption = caption
                     capture_table_fns = True
@@ -1019,7 +1026,9 @@ def _parse_section_lines(
 
             if _FIGURE_LABEL_RE.match(label):
                 fig = Figure(
-                    label=label, caption=caption, doi=pending_fig_doi,
+                    label=label,
+                    caption=caption,
+                    doi=pending_fig_doi,
                 )
                 section.figures.append(fig)
                 pending_fig_doi = ""
@@ -1031,7 +1040,9 @@ def _parse_section_lines(
 
             # Other bold labels (e.g., Supplementary File) — treat as figure
             fig = Figure(
-                label=label, caption=caption, doi=pending_fig_doi,
+                label=label,
+                caption=caption,
+                doi=pending_fig_doi,
             )
             section.figures.append(fig)
             pending_fig_doi = ""
@@ -1134,13 +1145,9 @@ def _parse_gfm_table(table_lines: list[str]) -> Table:
         cells = _parse_table_row(line)
         if not header_done:
             # Header row
-            table.rows.append(
-                [TableCell(text=c, is_header=True) for c in cells]
-            )
+            table.rows.append([TableCell(text=c, is_header=True) for c in cells])
         else:
-            table.rows.append(
-                [TableCell(text=c, is_header=False) for c in cells]
-            )
+            table.rows.append([TableCell(text=c, is_header=False) for c in cells])
 
     return table
 

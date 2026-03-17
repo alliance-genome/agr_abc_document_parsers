@@ -1,4 +1,5 @@
 """Tests for plain text extraction (plain_text.py)."""
+
 from agr_abc_document_parsers.models import (
     Document,
     Figure,
@@ -23,7 +24,6 @@ from agr_abc_document_parsers.plain_text import (
 
 
 class TestStripMarkdownFormatting:
-
     def test_bold(self):
         assert strip_markdown_formatting("The **bold** word") == "The bold word"
 
@@ -68,7 +68,6 @@ class TestStripMarkdownFormatting:
 
 
 class TestExtractPlainText:
-
     def test_empty_document(self):
         assert extract_plain_text(Document()) == ""
 
@@ -95,56 +94,87 @@ class TestExtractPlainText:
         assert "Second paragraph." in result
 
     def test_sections(self):
-        doc = Document(sections=[
-            Section(heading="Introduction", paragraphs=[
-                Paragraph(text="Intro text with **bold**."),
-            ]),
-            Section(heading="Methods", paragraphs=[
-                Paragraph(text="Methods text."),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Introduction",
+                    paragraphs=[
+                        Paragraph(text="Intro text with **bold**."),
+                    ],
+                ),
+                Section(
+                    heading="Methods",
+                    paragraphs=[
+                        Paragraph(text="Methods text."),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Introduction" in result
         assert "Intro text with bold." in result
         assert "Methods" in result
 
     def test_nested_sections(self):
-        doc = Document(sections=[
-            Section(heading="Methods", subsections=[
-                Section(heading="Samples", paragraphs=[
-                    Paragraph(text="Sample info."),
-                ]),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Methods",
+                    subsections=[
+                        Section(
+                            heading="Samples",
+                            paragraphs=[
+                                Paragraph(text="Sample info."),
+                            ],
+                        ),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Methods" in result
         assert "Samples" in result
         assert "Sample info." in result
 
     def test_figures_captions(self):
-        doc = Document(sections=[
-            Section(heading="Results", figures=[
-                Figure(label="Figure 1", caption="Expression of *BRCA1*."),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Results",
+                    figures=[
+                        Figure(label="Figure 1", caption="Expression of *BRCA1*."),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Expression of BRCA1." in result
 
     def test_table_captions(self):
-        doc = Document(sections=[
-            Section(heading="Results", tables=[
-                Table(label="Table 1", caption="Summary of **findings**."),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Results",
+                    tables=[
+                        Table(label="Table 1", caption="Summary of **findings**."),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Summary of findings." in result
 
     def test_lists(self):
-        doc = Document(sections=[
-            Section(heading="Methods", lists=[
-                ListBlock(items=["Step *one*", "Step **two**"], ordered=False),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Methods",
+                    lists=[
+                        ListBlock(items=["Step *one*", "Step **two**"], ordered=False),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Step one" in result
         assert "Step two" in result
@@ -158,8 +188,9 @@ class TestExtractPlainText:
         doc = Document(
             title="Title",
             references=[
-                Reference(index=1, authors=["Auth A"], title="Ref title",
-                          journal="Nature", year="2020"),
+                Reference(
+                    index=1, authors=["Auth A"], title="Ref title", journal="Nature", year="2020"
+                ),
             ],
         )
         result = extract_plain_text(doc)
@@ -167,11 +198,16 @@ class TestExtractPlainText:
         assert "Nature" not in result
 
     def test_back_matter(self):
-        doc = Document(back_matter=[
-            Section(heading="Funding", paragraphs=[
-                Paragraph(text="NIH grant R01."),
-            ]),
-        ])
+        doc = Document(
+            back_matter=[
+                Section(
+                    heading="Funding",
+                    paragraphs=[
+                        Paragraph(text="NIH grant R01."),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "Funding" in result
         assert "NIH grant R01." in result
@@ -180,10 +216,14 @@ class TestExtractPlainText:
         doc = Document(
             title="Main Paper",
             supplements=[
-                Document(sections=[
-                    Section(heading="Supplementary Methods",
-                            paragraphs=[Paragraph(text="Extra methods.")]),
-                ]),
+                Document(
+                    sections=[
+                        Section(
+                            heading="Supplementary Methods",
+                            paragraphs=[Paragraph(text="Extra methods.")],
+                        ),
+                    ]
+                ),
             ],
         )
         result = extract_plain_text(doc, include_supplements=True)
@@ -195,10 +235,14 @@ class TestExtractPlainText:
         doc = Document(
             title="Main Paper",
             supplements=[
-                Document(sections=[
-                    Section(heading="Supplementary Methods",
-                            paragraphs=[Paragraph(text="Extra methods.")]),
-                ]),
+                Document(
+                    sections=[
+                        Section(
+                            heading="Supplementary Methods",
+                            paragraphs=[Paragraph(text="Extra methods.")],
+                        ),
+                    ]
+                ),
             ],
         )
         result = extract_plain_text(doc, include_supplements=False)
@@ -206,27 +250,39 @@ class TestExtractPlainText:
         assert "Extra methods." not in result
 
     def test_doc_level_figures(self):
-        doc = Document(figures=[
-            Figure(label="Figure 1", caption="A *doc-level* figure."),
-        ])
+        doc = Document(
+            figures=[
+                Figure(label="Figure 1", caption="A *doc-level* figure."),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "A doc-level figure." in result
 
     def test_formulas(self):
-        doc = Document(sections=[
-            Section(heading="Theory", formulas=[
-                Formula(text="E = mc^2"),
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Theory",
+                    formulas=[
+                        Formula(text="E = mc^2"),
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "E = mc^2" in result
 
     def test_section_notes(self):
-        doc = Document(sections=[
-            Section(heading="Discussion", notes=[
-                "See **supplementary** materials.",
-            ]),
-        ])
+        doc = Document(
+            sections=[
+                Section(
+                    heading="Discussion",
+                    notes=[
+                        "See **supplementary** materials.",
+                    ],
+                ),
+            ]
+        )
         result = extract_plain_text(doc)
         assert "See supplementary materials." in result
 
@@ -237,7 +293,6 @@ class TestExtractPlainText:
 
 
 class TestExtractAbstractText:
-
     def test_empty(self):
         assert extract_abstract_text(Document()) == ""
 
@@ -246,18 +301,22 @@ class TestExtractAbstractText:
         assert extract_abstract_text(doc) == "Abstract text here."
 
     def test_multiple_paragraphs(self):
-        doc = Document(abstract=[
-            Paragraph(text="First paragraph."),
-            Paragraph(text="Second paragraph."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="First paragraph."),
+                Paragraph(text="Second paragraph."),
+            ]
+        )
         result = extract_abstract_text(doc)
         assert "First paragraph." in result
         assert "Second paragraph." in result
 
     def test_strips_formatting(self):
-        doc = Document(abstract=[
-            Paragraph(text="Study of *C. elegans* with **RNA-seq**."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="Study of *C. elegans* with **RNA-seq**."),
+            ]
+        )
         result = extract_abstract_text(doc)
         assert result == "Study of C. elegans with RNA-seq."
 
@@ -268,7 +327,6 @@ class TestExtractAbstractText:
 
 
 class TestExtractSentences:
-
     def test_empty(self):
         assert extract_sentences(Document()) == []
 
@@ -279,9 +337,11 @@ class TestExtractSentences:
         assert sentences[0] == "A single sentence."
 
     def test_multiple_sentences(self):
-        doc = Document(abstract=[
-            Paragraph(text="First sentence. Second sentence. Third sentence."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="First sentence. Second sentence. Third sentence."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 3
         assert sentences[0] == "First sentence."
@@ -289,48 +349,60 @@ class TestExtractSentences:
         assert sentences[2] == "Third sentence."
 
     def test_abbreviation_dr(self):
-        doc = Document(abstract=[
-            Paragraph(text="Dr. Smith conducted the study. Results were clear."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="Dr. Smith conducted the study. Results were clear."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 2
         assert sentences[0] == "Dr. Smith conducted the study."
 
     def test_abbreviation_fig(self):
-        doc = Document(abstract=[
-            Paragraph(text="As shown in Fig. 1. The data confirms this."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="As shown in Fig. 1. The data confirms this."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 2
         assert "Fig. 1." in sentences[0]
 
     def test_abbreviation_et_al(self):
-        doc = Document(abstract=[
-            Paragraph(text="Smith et al. reported findings. This was confirmed."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="Smith et al. reported findings. This was confirmed."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 2
         assert "et al." in sentences[0]
 
     def test_abbreviation_eg(self):
-        doc = Document(abstract=[
-            Paragraph(text="Some species (e.g. C. elegans) were studied. Analysis followed."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="Some species (e.g. C. elegans) were studied. Analysis followed."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 2
         assert "e.g." in sentences[0]
 
     def test_exclamation_question(self):
-        doc = Document(abstract=[
-            Paragraph(text="What is this? It is important! Results follow."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="What is this? It is important! Results follow."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 3
 
     def test_strips_formatting_in_sentences(self):
-        doc = Document(abstract=[
-            Paragraph(text="The *daf-16* gene is important. It regulates **aging**."),
-        ])
+        doc = Document(
+            abstract=[
+                Paragraph(text="The *daf-16* gene is important. It regulates **aging**."),
+            ]
+        )
         sentences = extract_sentences(doc)
         assert len(sentences) == 2
         assert sentences[0] == "The daf-16 gene is important."
@@ -340,8 +412,7 @@ class TestExtractSentences:
         doc = Document(
             title="Title",
             abstract=[Paragraph(text="Abstract sentence.")],
-            sections=[Section(heading="Intro",
-                              paragraphs=[Paragraph(text="Body sentence.")])],
+            sections=[Section(heading="Intro", paragraphs=[Paragraph(text="Body sentence.")])],
         )
         sentences = extract_sentences(doc)
         # All paragraphs collapsed into sentences
@@ -352,10 +423,11 @@ class TestExtractSentences:
         doc = Document(
             abstract=[Paragraph(text="Main text.")],
             supplements=[
-                Document(sections=[
-                    Section(heading="S1",
-                            paragraphs=[Paragraph(text="Supplement text.")])
-                ]),
+                Document(
+                    sections=[
+                        Section(heading="S1", paragraphs=[Paragraph(text="Supplement text.")])
+                    ]
+                ),
             ],
         )
         sentences = extract_sentences(doc, include_supplements=True)
@@ -365,10 +437,11 @@ class TestExtractSentences:
         doc = Document(
             abstract=[Paragraph(text="Main text.")],
             supplements=[
-                Document(sections=[
-                    Section(heading="S1",
-                            paragraphs=[Paragraph(text="Supplement text.")])
-                ]),
+                Document(
+                    sections=[
+                        Section(heading="S1", paragraphs=[Paragraph(text="Supplement text.")])
+                    ]
+                ),
             ],
         )
         sentences = extract_sentences(doc, include_supplements=False)
@@ -459,9 +532,14 @@ class TestPlainTextNewFeatures:
             sub_articles=[
                 Document(
                     title="Decision letter",
-                    sections=[Section(heading="Review", paragraphs=[
-                        Paragraph(text="Reviewer comment."),
-                    ])],
+                    sections=[
+                        Section(
+                            heading="Review",
+                            paragraphs=[
+                                Paragraph(text="Reviewer comment."),
+                            ],
+                        )
+                    ],
                 ),
             ],
         )
@@ -475,9 +553,14 @@ class TestPlainTextNewFeatures:
             sub_articles=[
                 Document(
                     title="Decision letter",
-                    sections=[Section(heading="Review", paragraphs=[
-                        Paragraph(text="Reviewer comment."),
-                    ])],
+                    sections=[
+                        Section(
+                            heading="Review",
+                            paragraphs=[
+                                Paragraph(text="Reviewer comment."),
+                            ],
+                        )
+                    ],
                 ),
             ],
         )

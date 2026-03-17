@@ -8,6 +8,7 @@ Run manually with::
 Requires network access to PMC S3 bucket (pmc-oa-opendata.s3.amazonaws.com).
 No AWS account or API key needed — the bucket is publicly accessible.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,13 +41,12 @@ from tests.pmc_parity_helpers import (
 _CACHE_DIR = Path(__file__).parent / ".pmcdata"
 _FIXED_ARTICLES = Path(__file__).parent / "pmc_fixed_articles.txt"
 
-_ESEARCH_URL = (
-    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-)
+_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 
 
 def _fetch_random_pmcids(
-    count: int, api_key: str | None,
+    count: int,
+    api_key: str | None,
 ) -> list[str]:
     """Fetch random Open Access PMCIDs using NCBI esearch.
 
@@ -128,7 +128,9 @@ def _load_fixed_articles() -> list[str]:
 
 
 def _ensure_cached(
-    pmcid: str, api_key: str | None, refresh: bool = False,
+    pmcid: str,
+    api_key: str | None,
+    refresh: bool = False,
 ) -> tuple[Path | None, Path | None, Path | None]:
     """Ensure XML, plain text, and BioC are cached for a PMCID.
 
@@ -173,7 +175,8 @@ def _ensure_cached(
         bioc_data = fetch_bioc(pmcid)
         if bioc_data:
             bioc_path.write_text(
-                json.dumps(bioc_data), encoding="utf-8",
+                json.dumps(bioc_data),
+                encoding="utf-8",
             )
         else:
             bioc_path = None
@@ -195,7 +198,9 @@ def _ensure_cached(
 
 
 def _compare_article(
-    pmcid: str, api_key: str | None, refresh: bool = False,
+    pmcid: str,
+    api_key: str | None,
+    refresh: bool = False,
 ) -> dict[str, Any]:
     """Compare JATS→Markdown pipeline against PMC S3 plain text + BioC.
 
@@ -225,7 +230,9 @@ def _compare_article(
 
     try:
         xml_path, txt_path, bioc_path = _ensure_cached(
-            pmcid, api_key, refresh,
+            pmcid,
+            api_key,
+            refresh,
         )
     except Exception as exc:
         result["error"] = f"fetch error: {exc}"
@@ -257,7 +264,8 @@ def _compare_article(
 
     # Read reference data
     pmc_reference_text = txt_path.read_text(
-        encoding="utf-8", errors="replace",
+        encoding="utf-8",
+        errors="replace",
     )
     bioc_data = None
     if bioc_path and bioc_path.exists():
@@ -293,11 +301,13 @@ def pytest_generate_tests(metafunc):
 
     fixed = _load_fixed_articles()
     cached_only = metafunc.config.getoption(
-        "--cached-only", default=False,
+        "--cached-only",
+        default=False,
     )
     count = metafunc.config.getoption("--count", default=500)
     api_key_opt = metafunc.config.getoption(
-        "--ncbi-api-key", default=None,
+        "--ncbi-api-key",
+        default=None,
     )
     api_key = api_key_opt or os.environ.get("NCBI_API_KEY")
 
@@ -307,11 +317,7 @@ def pytest_generate_tests(metafunc):
         all_ids = list(fixed)
         if _CACHE_DIR.exists():
             for d in sorted(_CACHE_DIR.iterdir()):
-                if (
-                    d.is_dir()
-                    and d.name.isdigit()
-                    and d.name not in seen
-                ):
+                if d.is_dir() and d.name.isdigit() and d.name not in seen:
                     seen.add(d.name)
                     all_ids.append(d.name)
     else:
@@ -329,11 +335,7 @@ def pytest_generate_tests(metafunc):
         # Include all cached articles for regression coverage
         if _CACHE_DIR.exists():
             for d in sorted(_CACHE_DIR.iterdir()):
-                if (
-                    d.is_dir()
-                    and d.name.isdigit()
-                    and d.name not in seen
-                ):
+                if d.is_dir() and d.name.isdigit() and d.name not in seen:
                     seen.add(d.name)
                     all_ids.append(d.name)
         for pid in random_ids:
@@ -355,7 +357,9 @@ def pytest_generate_tests(metafunc):
         testable.append(pid)
 
     metafunc.parametrize(
-        "pmcid", testable, ids=[f"PMC{p}" for p in testable],
+        "pmcid",
+        testable,
+        ids=[f"PMC{p}" for p in testable],
     )
 
 
@@ -363,7 +367,8 @@ def pytest_generate_tests(metafunc):
 def pmc_api_key(request):
     """Resolve NCBI API key from CLI, env var, or .env file."""
     key = request.config.getoption(
-        "--ncbi-api-key", default=None,
+        "--ncbi-api-key",
+        default=None,
     )
     if key:
         return key
@@ -375,6 +380,7 @@ def pmc_api_key(request):
     if env_file.exists():
         try:
             from dotenv import dotenv_values
+
             env = dotenv_values(env_file)
             return env.get("NCBI_API_KEY")
         except ImportError:
@@ -390,7 +396,8 @@ def pmc_api_key(request):
 def pmc_refresh(request):
     """Whether to force re-download cached data."""
     return request.config.getoption(
-        "--refresh-cache", default=False,
+        "--refresh-cache",
+        default=False,
     )
 
 
@@ -405,22 +412,15 @@ def pmc_results():
     testable = [r for r in results if r["verdict"] != "SKIP"]
     report = {
         "total_articles": len(testable),
-        "passed": sum(
-            1 for r in testable if r["verdict"] == "PASS"
-        ),
-        "failed": sum(
-            1 for r in testable if r["verdict"] == "FAIL"
-        ),
-        "errors": sum(
-            1 for r in testable if r["verdict"] == "ERROR"
-        ),
-        "skipped": sum(
-            1 for r in results if r["verdict"] == "SKIP"
-        ),
+        "passed": sum(1 for r in testable if r["verdict"] == "PASS"),
+        "failed": sum(1 for r in testable if r["verdict"] == "FAIL"),
+        "errors": sum(1 for r in testable if r["verdict"] == "ERROR"),
+        "skipped": sum(1 for r in results if r["verdict"] == "SKIP"),
         "articles": results,
     }
     report_path.write_text(
-        json.dumps(report, indent=2), encoding="utf-8",
+        json.dumps(report, indent=2),
+        encoding="utf-8",
     )
 
 
@@ -429,7 +429,11 @@ class TestPMCConversion:
     """Compare JATS→Markdown conversion against PMC S3 plain text + BioC."""
 
     def test_conversion_parity(
-        self, pmcid, pmc_api_key, pmc_refresh, pmc_results,
+        self,
+        pmcid,
+        pmc_api_key,
+        pmc_refresh,
+        pmc_results,
     ):
         result = _compare_article(pmcid, pmc_api_key, pmc_refresh)
         pmc_results.append(result)
@@ -441,11 +445,7 @@ class TestPMCConversion:
             pytest.fail(f"PMC{pmcid}: {result['error']}")
 
         if result["verdict"] in ("FAIL", "WARN"):
-            bioc_tag = (
-                " (BioC available)"
-                if result["bioc_available"]
-                else ""
-            )
+            bioc_tag = " (BioC available)" if result["bioc_available"] else ""
             lines = [
                 f"PMC{pmcid}{bioc_tag}: "
                 f"fulltext={result['fulltext_similarity']:.2%}, "
@@ -470,11 +470,9 @@ class TestPMCConversion:
             # is missing (txt_only / partial differences only),
             # or when the verdict is WARN (few confirmed missing
             # with high fulltext similarity).
-            if (
-                result["missing_confirmed"] == 0
-                or result["verdict"] == "WARN"
-            ):
+            if result["missing_confirmed"] == 0 or result["verdict"] == "WARN":
                 import warnings
+
                 warnings.warn(
                     f"PMC parity warning: {msg}",
                     stacklevel=2,

@@ -485,10 +485,7 @@ class TestAGRNxmlConversion:
             # is missing (txt_only / partial differences only),
             # or when the verdict is WARN (few confirmed missing
             # with high fulltext similarity).
-            if (
-                result["missing_confirmed"] == 0
-                or result["verdict"] == "WARN"
-            ):
+            if result["missing_confirmed"] == 0 or result["verdict"] == "WARN":
                 import warnings
 
                 warnings.warn(

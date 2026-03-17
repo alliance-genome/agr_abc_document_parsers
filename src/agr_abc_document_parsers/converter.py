@@ -3,6 +3,7 @@
 Detects format (TEI or JATS) and dispatches to the appropriate parser,
 then emits Markdown via the shared emitter.
 """
+
 from __future__ import annotations
 
 from lxml import etree
@@ -44,9 +45,7 @@ def _detect_format_from_root(root: etree._Element) -> str:
     raise ValueError(f"Unknown format: unrecognized root element <{tag}>")
 
 
-def convert_xml_to_markdown(
-    xml_content: bytes, source_format: str = "auto"
-) -> str:
+def convert_xml_to_markdown(xml_content: bytes, source_format: str = "auto") -> str:
     """Convert TEI or JATS XML to a Markdown string.
 
     Args:

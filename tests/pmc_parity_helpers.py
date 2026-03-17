@@ -4,6 +4,7 @@ Extracted from ``test_pmc_conversion.py`` so that multiple test modules
 (PMC random, AGR nxml, etc.) can compare pipeline output against PMC S3
 plain text and BioC API references.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -21,8 +22,7 @@ from urllib.request import Request, urlopen
 
 S3_BASE = "https://pmc-oa-opendata.s3.amazonaws.com"
 BIOC_URL = (
-    "https://www.ncbi.nlm.nih.gov/research/bionlp/RESTful/"
-    "pmcoa.cgi/BioC_json/PMC{pmcid}/unicode"
+    "https://www.ncbi.nlm.nih.gov/research/bionlp/RESTful/pmcoa.cgi/BioC_json/PMC{pmcid}/unicode"
 )
 
 # BioC section types excluded from comparison.
@@ -68,7 +68,7 @@ def fetch_url(url: str, retries: int = 3) -> bytes:
         except (HTTPError, URLError, TimeoutError):
             if attempt == retries - 1:
                 raise
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
     return b""  # unreachable
 
 
@@ -78,7 +78,9 @@ def fetch_url(url: str, retries: int = 3) -> bytes:
 
 
 def fetch_s3_file(
-    pmcid: str, ext: str, version: int = 1,
+    pmcid: str,
+    ext: str,
+    version: int = 1,
 ) -> bytes | None:
     """Fetch a file from the PMC S3 bucket.
 
@@ -123,7 +125,8 @@ def extract_bioc_paragraphs(bioc_json: dict[str, Any]) -> list[str]:
     for doc in bioc_json.get("documents", []):
         for passage in doc.get("passages", []):
             section = passage.get("infons", {}).get(
-                "section_type", "",
+                "section_type",
+                "",
             )
             if section in BIOC_SKIP_SECTIONS:
                 continue
@@ -190,22 +193,16 @@ def parse_pmc_text(raw_text: str) -> dict[str, Any]:
     # Filter out sub-article PMC S3 metadata headers (JOURNAL/ARTICLE
     # INFORMATION blocks) that appear mid-text for sub-articles.
     paragraphs = [
-        p for p in paragraphs
-        if not (
-            p.startswith("JOURNAL INFORMATION\n")
-            or p.startswith("ARTICLE INFORMATION\n")
-        )
+        p
+        for p in paragraphs
+        if not (p.startswith("JOURNAL INFORMATION\n") or p.startswith("ARTICLE INFORMATION\n"))
     ]
 
     # Detect where references start
     ref_start_idx = detect_reference_start(paragraphs)
 
-    body_paragraphs = (
-        paragraphs[:ref_start_idx] if ref_start_idx else paragraphs
-    )
-    ref_paragraphs = (
-        paragraphs[ref_start_idx:] if ref_start_idx else []
-    )
+    body_paragraphs = paragraphs[:ref_start_idx] if ref_start_idx else paragraphs
+    ref_paragraphs = paragraphs[ref_start_idx:] if ref_start_idx else []
 
     # Extract title from ARTICLE INFORMATION block
     title = ""
@@ -217,12 +214,22 @@ def parse_pmc_text(raw_text: str) -> dict[str, Any]:
                     continue
                 if not stripped_line:
                     continue
-                if any(stripped_line.startswith(p) for p in [
-                    "PMCID:", "PMID:", "DOI:", "Article ID:",
-                    "Article version:", "Subjects:", "EISSN:",
-                    "ISSN:", "Publisher:", "Journal ID:",
-                    "NLM Title",
-                ]):
+                if any(
+                    stripped_line.startswith(p)
+                    for p in [
+                        "PMCID:",
+                        "PMID:",
+                        "DOI:",
+                        "Article ID:",
+                        "Article version:",
+                        "Subjects:",
+                        "EISSN:",
+                        "ISSN:",
+                        "Publisher:",
+                        "Journal ID:",
+                        "NLM Title",
+                    ]
+                ):
                     continue
                 # This should be the title
                 title = stripped_line
@@ -304,15 +311,10 @@ def detect_reference_start(paragraphs: list[str]) -> int | None:
             for j in range(i + 1, len(paragraphs)):
                 subsequent = paragraphs[j]
                 has_year = bool(_YEAR_PATTERN.search(subsequent))
-                has_bare_year = bool(
-                    _BARE_YEAR_PATTERN.search(subsequent)
-                )
+                has_bare_year = bool(_BARE_YEAR_PATTERN.search(subsequent))
                 has_pmid = bool(_PMID_PATTERN.search(subsequent))
                 has_doi = bool(_DOI_PATTERN.search(subsequent))
-                if (
-                    has_year or has_bare_year
-                    or has_pmid or has_doi
-                ):
+                if has_year or has_bare_year or has_pmid or has_doi:
                     return i
             break
 
@@ -340,12 +342,8 @@ def detect_reference_start(paragraphs: list[str]) -> int | None:
     )
     if paragraphs:
         last = paragraphs[-1]
-        cite_lines = [
-            ln.strip() for ln in last.split("\n") if ln.strip()
-        ]
-        if len(cite_lines) >= 2 and all(
-            _BARE_CITATION_RE.match(ln) for ln in cite_lines
-        ):
+        cite_lines = [ln.strip() for ln in last.split("\n") if ln.strip()]
+        if len(cite_lines) >= 2 and all(_BARE_CITATION_RE.match(ln) for ln in cite_lines):
             return len(paragraphs) - 1
 
     # Strategy 6: trailing paragraph(s) that are bare citation blocks.
@@ -354,13 +352,9 @@ def detect_reference_start(paragraphs: list[str]) -> int | None:
     )
     if paragraphs:
         last = paragraphs[-1]
-        cite_lines = [
-            ln.strip() for ln in last.split("\n") if ln.strip()
-        ]
+        cite_lines = [ln.strip() for ln in last.split("\n") if ln.strip()]
         if cite_lines:
-            all_have_year = all(
-                _BARE_YEAR_PATTERN.search(ln) for ln in cite_lines
-            )
+            all_have_year = all(_BARE_YEAR_PATTERN.search(ln) for ln in cite_lines)
             if all_have_year:
                 has_pmid = bool(_PMID_PATTERN.search(last))
                 has_doi = bool(_DOI_PATTERN.search(last))
@@ -399,7 +393,9 @@ def normalize_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     # Remove isolated citation numbers that appear directly after words
     text = re.sub(
-        r"(?<=[a-zA-Z)])(\d{1,3})(?=[\s.,;:]|$)", "", text,
+        r"(?<=[a-zA-Z)])(\d{1,3})(?=[\s.,;:]|$)",
+        "",
+        text,
     )
     # Lowercase
     text = text.lower()
@@ -433,7 +429,8 @@ def paragraph_similarity(para1: str, para2: str) -> float:
 
 
 def find_best_paragraph_match(
-    pmc_para: str, our_paragraphs: list[str],
+    pmc_para: str,
+    our_paragraphs: list[str],
 ) -> tuple[float, int]:
     """Find the best matching paragraph from our output.
 
@@ -472,13 +469,16 @@ def find_best_paragraph_match(
         # Token overlap pre-filter
         our_tokens = set(norm_ours.split())
         overlap = len(pmc_tokens & our_tokens) / max(
-            len(pmc_tokens), len(our_tokens),
+            len(pmc_tokens),
+            len(our_tokens),
         )
         if overlap < 0.3:
             continue
 
         ratio = difflib.SequenceMatcher(
-            None, norm_pmc, norm_ours,
+            None,
+            norm_pmc,
+            norm_ours,
         ).ratio()
         if ratio > best_ratio:
             best_ratio = ratio
@@ -558,9 +558,11 @@ _ABBREV_DEF_PATTERN = re.compile(
 
 # Back-matter heading variations that map to our structured fields
 _BACKMATTER_HEADING_ALIASES = {
-    "conflict of interest", "conflicts of interest",
+    "conflict of interest",
+    "conflicts of interest",
     "conflict of interests",
-    "ethics/ethical approval", "ethical approval",
+    "ethics/ethical approval",
+    "ethical approval",
     "medical writing, editorial, and other assistance",
     "medical writing, editorial and other assistance",
     "notes and references",
@@ -598,7 +600,8 @@ def classify_pmc_paragraph(para: str) -> str:
 
     # Figure/table captions (including supplementary labels)
     if re.match(
-        r"^(?:Figure|Table|Supplementary|S\d+)\s+\d*", stripped,
+        r"^(?:Figure|Table|Supplementary|S\d+)\s+\d*",
+        stripped,
     ):
         return "figure_caption"
 
@@ -606,10 +609,7 @@ def classify_pmc_paragraph(para: str) -> str:
     if len(stripped) < 80 and not stripped.endswith("."):
         if stripped.lower() in _BACKMATTER_HEADING_ALIASES:
             return "metadata"
-        if (
-            _ABBREV_DEF_PATTERN.match(stripped)
-            and len(stripped) < 150
-        ):
+        if _ABBREV_DEF_PATTERN.match(stripped) and len(stripped) < 150:
             return "metadata"
         return "section_heading"
 
@@ -622,7 +622,8 @@ def classify_pmc_paragraph(para: str) -> str:
 
 
 def cross_check_bioc(
-    missing_para: str, bioc_paragraphs: list[str],
+    missing_para: str,
+    bioc_paragraphs: list[str],
 ) -> str:
     """Check if a paragraph missing from our output exists in BioC.
 
@@ -633,7 +634,8 @@ def cross_check_bioc(
         'partial_bioc' - BioC has partial match
     """
     best_ratio, _ = find_best_paragraph_match(
-        missing_para, bioc_paragraphs,
+        missing_para,
+        bioc_paragraphs,
     )
     if best_ratio >= 0.90:
         return "in_bioc"
@@ -712,9 +714,7 @@ def compare_against_pmc_reference(
         return result
 
     # Split our output into paragraphs
-    our_paragraphs = [
-        p.strip() for p in our_plain_text.split("\n\n") if p.strip()
-    ]
+    our_paragraphs = [p.strip() for p in our_plain_text.split("\n\n") if p.strip()]
 
     # --- Fulltext similarity ---
     pmc_fulltext = "\n\n".join(pmc_body)
@@ -722,7 +722,9 @@ def compare_against_pmc_reference(
     norm_ours = normalize_text(our_plain_text)
     if norm_pmc and norm_ours:
         result["fulltext_similarity"] = difflib.SequenceMatcher(
-            None, norm_ours, norm_pmc,
+            None,
+            norm_ours,
+            norm_pmc,
         ).ratio()
 
     # --- Paragraph-level comparison ---
@@ -742,7 +744,8 @@ def compare_against_pmc_reference(
 
         body_count += 1
         best_ratio, best_idx = find_best_paragraph_match(
-            pmc_para, our_paragraphs,
+            pmc_para,
+            our_paragraphs,
         )
 
         if best_ratio >= 0.90:
@@ -752,7 +755,8 @@ def compare_against_pmc_reference(
             bioc_status = "no_bioc"
             if bioc_paragraphs:
                 bioc_status = cross_check_bioc(
-                    pmc_para, bioc_paragraphs,
+                    pmc_para,
+                    bioc_paragraphs,
                 )
 
             if bioc_status == "in_bioc":
@@ -762,12 +766,14 @@ def compare_against_pmc_reference(
             else:
                 txt_only_missing += 1
 
-            missing.append({
-                "category": category,
-                "ratio": round(best_ratio, 3),
-                "bioc_status": bioc_status,
-                "pmc_text": pmc_para[:200],
-            })
+            missing.append(
+                {
+                    "category": category,
+                    "ratio": round(best_ratio, 3),
+                    "bioc_status": bioc_status,
+                    "pmc_text": pmc_para[:200],
+                }
+            )
 
     result["body_paragraphs"] = body_count
     result["matched_paragraphs"] = matched
@@ -775,16 +781,11 @@ def compare_against_pmc_reference(
     result["missing_txt_only"] = txt_only_missing
     result["missing_partial_bioc"] = partial_bioc
     result["total_missing"] = len(missing)
-    result["match_ratio"] = (
-        matched / body_count if body_count > 0 else 1.0
-    )
+    result["match_ratio"] = matched / body_count if body_count > 0 else 1.0
     result["missing_details"] = missing[:30]
     if len(missing) == 0:
         result["verdict"] = "PASS"
-    elif (
-        confirmed_missing <= 3
-        and result["fulltext_similarity"] > 0.80
-    ):
+    elif confirmed_missing <= 3 and result["fulltext_similarity"] > 0.80:
         result["verdict"] = "WARN"
     else:
         result["verdict"] = "FAIL"

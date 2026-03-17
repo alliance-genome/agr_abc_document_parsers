@@ -4,6 +4,7 @@ Provides environment loading, database config, S3 config, and S3
 download helpers used by multiple test modules (TEI parity, future
 nxml parity, etc.).
 """
+
 from __future__ import annotations
 
 import gzip
@@ -28,11 +29,8 @@ def load_env() -> dict[str, str]:
     if ENV_FILE.exists():
         try:
             from dotenv import dotenv_values
-            env = {
-                k: v
-                for k, v in dotenv_values(ENV_FILE).items()
-                if v is not None
-            }
+
+            env = {k: v for k, v in dotenv_values(ENV_FILE).items() if v is not None}
         except ImportError:
             # Fallback: manual parsing
             for line in ENV_FILE.read_text().splitlines():
@@ -51,16 +49,20 @@ def get_db_config() -> dict[str, str]:
     return {
         "host": os.environ.get("PSQL_HOST", env.get("PSQL_HOST", "")),
         "port": os.environ.get(
-            "PSQL_PORT", env.get("PSQL_PORT", "5432"),
+            "PSQL_PORT",
+            env.get("PSQL_PORT", "5432"),
         ),
         "database": os.environ.get(
-            "PSQL_DATABASE", env.get("PSQL_DATABASE", "literature"),
+            "PSQL_DATABASE",
+            env.get("PSQL_DATABASE", "literature"),
         ),
         "user": os.environ.get(
-            "PSQL_USERNAME", env.get("PSQL_USERNAME", "postgres"),
+            "PSQL_USERNAME",
+            env.get("PSQL_USERNAME", "postgres"),
         ),
         "password": os.environ.get(
-            "PSQL_PASSWORD", env.get("PSQL_PASSWORD", ""),
+            "PSQL_PASSWORD",
+            env.get("PSQL_PASSWORD", ""),
         ),
     }
 
@@ -74,10 +76,12 @@ def get_s3_config() -> dict[str, str]:
             os.environ[key] = env[key]
     return {
         "bucket": os.environ.get(
-            "S3_BUCKET", env.get("S3_BUCKET", "agr-literature"),
+            "S3_BUCKET",
+            env.get("S3_BUCKET", "agr-literature"),
         ),
         "env_prefix": os.environ.get(
-            "S3_ENV_PREFIX", env.get("S3_ENV_PREFIX", "prod"),
+            "S3_ENV_PREFIX",
+            env.get("S3_ENV_PREFIX", "prod"),
         ),
     }
 
@@ -115,7 +119,8 @@ def download_from_agr_s3(md5sum: str) -> bytes | None:
     try:
         client = boto3.client("s3")
         response = client.get_object(
-            Bucket=s3_config["bucket"], Key=s3_key,
+            Bucket=s3_config["bucket"],
+            Key=s3_key,
         )
         compressed_data = response["Body"].read()
     except ClientError:

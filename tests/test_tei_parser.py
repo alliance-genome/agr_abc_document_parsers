@@ -1094,6 +1094,7 @@ class TestTeiParser:
 </TEI>
 """
         import logging
+
         with caplog.at_level(logging.WARNING):
             doc = parse_tei(tei)
         assert any("rowspan" in r.message for r in caplog.records)

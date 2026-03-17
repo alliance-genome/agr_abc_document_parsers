@@ -1,4 +1,5 @@
 """Tests for Markdown schema validator."""
+
 from __future__ import annotations
 
 from agr_abc_document_parsers.md_emitter import emit_markdown
@@ -18,6 +19,7 @@ from agr_abc_document_parsers.models import (
 
 # -- Helpers ----------------------------------------------------------------
 
+
 def _valid_md() -> str:
     """Return a minimal valid Markdown document."""
     return "# Title\n\n## Abstract\n\nSome text.\n\n## References\n\n1. Ref one.\n"
@@ -29,6 +31,7 @@ def _ids(result) -> list[str]:
 
 
 # -- S01: Exactly one H1 heading -------------------------------------------
+
 
 class TestS01:
     def test_no_h1_is_warning(self):
@@ -49,6 +52,7 @@ class TestS01:
 
 
 # -- S02: H1 must be the first heading -------------------------------------
+
 
 class TestS02:
     def test_h2_before_h1_with_h1_is_error(self):
@@ -72,6 +76,7 @@ class TestS02:
 
 # -- S03: No heading level skips -------------------------------------------
 
+
 class TestS03:
     def test_skip_h2_to_h4(self):
         md = "# Title\n\n## Section\n\n#### Deep\n\nText.\n"
@@ -85,6 +90,7 @@ class TestS03:
 
 
 # -- S04: Abstract before body sections ------------------------------------
+
 
 class TestS04:
     def test_abstract_not_first_h2(self):
@@ -104,6 +110,7 @@ class TestS04:
 
 # -- S05: References is the last H2 ----------------------------------------
 
+
 class TestS05:
     def test_references_not_last(self):
         md = "# Title\n\n## References\n\n1. Ref.\n\n## Appendix\n\nText.\n"
@@ -117,25 +124,21 @@ class TestS05:
 
 # -- S06: Acknowledgments before References --------------------------------
 
+
 class TestS06:
     def test_ack_after_refs(self):
-        md = (
-            "# Title\n\n## References\n\n1. Ref.\n\n"
-            "## Acknowledgments\n\nThanks.\n"
-        )
+        md = "# Title\n\n## References\n\n1. Ref.\n\n## Acknowledgments\n\nThanks.\n"
         result = validate_markdown(md)
         assert "S06" in _ids(result)
 
     def test_ack_before_refs_ok(self):
-        md = (
-            "# Title\n\n## Acknowledgments\n\nThanks.\n\n"
-            "## References\n\n1. Ref.\n"
-        )
+        md = "# Title\n\n## Acknowledgments\n\nThanks.\n\n## References\n\n1. Ref.\n"
         result = validate_markdown(md)
         assert "S06" not in _ids(result)
 
 
 # -- S07: GFM table structure ----------------------------------------------
+
 
 class TestS07:
     def test_table_without_separator_is_error(self):
@@ -160,6 +163,7 @@ class TestS07:
 
 # -- S08: Block elements followed by blank lines ---------------------------
 
+
 class TestS08:
     def test_heading_without_blank_line(self):
         md = "# Title\n## Section\nText.\n"
@@ -172,6 +176,7 @@ class TestS08:
 
 
 # -- S09: Trailing newline -------------------------------------------------
+
 
 class TestS09:
     def test_no_trailing_newline(self):
@@ -193,54 +198,69 @@ class TestS09:
 
 # -- Round-trip test --------------------------------------------------------
 
+
 class TestRoundTrip:
     def test_emitter_output_validates(self):
         """Markdown produced by emit_markdown() passes validation."""
         doc = Document(
             title="A Study of Gene Expression",
             authors=[
-                Author(given_name="Alice", surname="Smith",
-                       affiliations=["MIT"]),
+                Author(given_name="Alice", surname="Smith", affiliations=["MIT"]),
             ],
             abstract=[Paragraph(text="This study examines expression.")],
             keywords=["gene expression", "RNA-seq"],
             sections=[
-                Section(heading="Introduction", level=1,
-                        paragraphs=[Paragraph(text="Intro text.")]),
-                Section(heading="Methods", level=1,
-                        paragraphs=[Paragraph(text="Methods text.")],
-                        subsections=[
-                            Section(heading="Samples", level=2,
-                                    paragraphs=[Paragraph(text="Sample info.")]),
-                        ]),
-                Section(heading="Results", level=1,
-                        tables=[
-                            Table(label="Table 1", caption="Summary.", rows=[
-                                [TableCell(text="Gene"),
-                                 TableCell(text="Value")],
-                                [TableCell(text="BRCA1"),
-                                 TableCell(text="2.5")],
-                            ]),
-                        ]),
+                Section(
+                    heading="Introduction", level=1, paragraphs=[Paragraph(text="Intro text.")]
+                ),
+                Section(
+                    heading="Methods",
+                    level=1,
+                    paragraphs=[Paragraph(text="Methods text.")],
+                    subsections=[
+                        Section(
+                            heading="Samples", level=2, paragraphs=[Paragraph(text="Sample info.")]
+                        ),
+                    ],
+                ),
+                Section(
+                    heading="Results",
+                    level=1,
+                    tables=[
+                        Table(
+                            label="Table 1",
+                            caption="Summary.",
+                            rows=[
+                                [TableCell(text="Gene"), TableCell(text="Value")],
+                                [TableCell(text="BRCA1"), TableCell(text="2.5")],
+                            ],
+                        ),
+                    ],
+                ),
             ],
             acknowledgments="We thank the NIH.",
             references=[
-                Reference(index=1, authors=["Lee C"],
-                          title="Ref title", journal="Nature",
-                          volume="1", year="2020"),
+                Reference(
+                    index=1,
+                    authors=["Lee C"],
+                    title="Ref title",
+                    journal="Nature",
+                    volume="1",
+                    year="2020",
+                ),
             ],
         )
         md = emit_markdown(doc)
         result = validate_markdown(md)
         assert result.valid, (
-            f"emit_markdown output failed validation: "
-            f"errors={[e.message for e in result.errors]}"
+            f"emit_markdown output failed validation: errors={[e.message for e in result.errors]}"
         )
         # Warnings are acceptable but there should be no errors
         assert len(result.errors) == 0
 
 
 # -- Aggregate result properties -------------------------------------------
+
 
 class TestValidationResult:
     def test_valid_document(self):
@@ -262,6 +282,7 @@ class TestValidationResult:
 
 
 # -- S07/S08 code fence interaction ----------------------------------------
+
 
 class TestCodeFenceInteraction:
     def test_s07_ignores_pipes_inside_code_fence(self):
@@ -291,6 +312,7 @@ class TestCodeFenceInteraction:
 
 # -- S05 with sub-articles ------------------------------------------------
 
+
 class TestS05WithSubArticles:
     """S05 should not flag H2 headings in sub-articles."""
 
@@ -310,12 +332,7 @@ class TestS05WithSubArticles:
 
     def test_thematic_break_before_refs_still_flags(self):
         """A --- before References should not suppress S05."""
-        md = (
-            "# Title\n\n"
-            "---\n\n"
-            "## References\n\n1. Ref.\n\n"
-            "## Appendix\n\nText.\n"
-        )
+        md = "# Title\n\n---\n\n## References\n\n1. Ref.\n\n## Appendix\n\nText.\n"
         result = validate_markdown(md)
         assert "S05" in _ids(result)
 
@@ -324,25 +341,28 @@ class TestS05WithSubArticles:
         doc = Document(
             title="Study",
             abstract=[Paragraph(text="Abstract.")],
-            sections=[Section(heading="Introduction", level=1,
-                              paragraphs=[Paragraph(text="Body.")])],
+            sections=[
+                Section(heading="Introduction", level=1, paragraphs=[Paragraph(text="Body.")])
+            ],
             references=[
-                Reference(index=1, authors=["A B"], title="T",
-                          journal="J", year="2024"),
+                Reference(index=1, authors=["A B"], title="T", journal="J", year="2024"),
             ],
             sub_articles=[
                 Document(
                     title="Decision letter",
-                    sections=[Section(paragraphs=[
-                        Paragraph(text="Review."),
-                    ])],
+                    sections=[
+                        Section(
+                            paragraphs=[
+                                Paragraph(text="Review."),
+                            ]
+                        )
+                    ],
                 ),
             ],
         )
         from agr_abc_document_parsers.md_emitter import emit_markdown
+
         md = emit_markdown(doc)
         result = validate_markdown(md)
-        assert result.valid, (
-            f"Validation failed: errors={[e.message for e in result.errors]}"
-        )
+        assert result.valid, f"Validation failed: errors={[e.message for e in result.errors]}"
         assert "S05" not in _ids(result)

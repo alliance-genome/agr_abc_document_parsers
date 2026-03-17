@@ -5,6 +5,7 @@ agr_literature_service and agr_pdf_extraction_service.
 
 See MARKDOWN_SCHEMA.md for the full specification.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,6 +15,7 @@ from enum import Enum
 
 class Severity(str, Enum):
     """Severity level for validation issues."""
+
     ERROR = "error"
     WARNING = "warning"
 
@@ -21,6 +23,7 @@ class Severity(str, Enum):
 @dataclass
 class ValidationIssue:
     """A single validation finding."""
+
     rule_id: str
     severity: Severity
     line: int
@@ -30,6 +33,7 @@ class ValidationIssue:
 @dataclass
 class ValidationResult:
     """Aggregate result of validating a Markdown document."""
+
     valid: bool = True
     errors: list[ValidationIssue] = field(default_factory=list)
     warnings: list[ValidationIssue] = field(default_factory=list)
@@ -47,14 +51,14 @@ _RE_CODE_FENCE = re.compile(r"^`{3,}[^`]*$")
 _RE_HR = re.compile(r"^---\s*$")
 _RE_BLOCK_ELEMENT = re.compile(
     r"^("
-    r"#{1,6}\s"           # heading
-    r"|\|.*\|"            # table row
-    r"|- "                # unordered list item
-    r"|\d+\.\s"           # ordered list item
-    r"|\*\*Figure\s"      # figure caption
-    r"|\*\*Table\s"       # table caption
-    r"|\[\^"              # footnote
-    r"|`{3,}\s*"          # fenced code block delimiter
+    r"#{1,6}\s"  # heading
+    r"|\|.*\|"  # table row
+    r"|- "  # unordered list item
+    r"|\d+\.\s"  # ordered list item
+    r"|\*\*Figure\s"  # figure caption
+    r"|\*\*Table\s"  # table caption
+    r"|\[\^"  # footnote
+    r"|`{3,}\s*"  # fenced code block delimiter
     r")"
 )
 
@@ -90,6 +94,7 @@ def validate_markdown(text: str) -> ValidationResult:
 # Individual rule checkers
 # ---------------------------------------------------------------------------
 
+
 def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
     """Return ``[(line_number, level, text), ...]`` for all headings."""
     out: list[tuple[int, int, str]] = []
@@ -101,27 +106,37 @@ def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
 
 
 def _check_s01(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
 ) -> None:
     """S01: Exactly one H1 heading."""
     h1s = [(ln, txt) for ln, lvl, txt in headings if lvl == 1]
     if len(h1s) == 0:
         # Missing title is a source-data issue (e.g., GROBID couldn't
         # extract one), not a conversion bug — warn instead of error.
-        result.warnings.append(ValidationIssue(
-            rule_id="S01", severity=Severity.WARNING, line=1,
-            message="Document has no H1 heading (expected exactly one)",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S01",
+                severity=Severity.WARNING,
+                line=1,
+                message="Document has no H1 heading (expected exactly one)",
+            )
+        )
     elif len(h1s) > 1:
         for ln, _ in h1s[1:]:
-            result.errors.append(ValidationIssue(
-                rule_id="S01", severity=Severity.ERROR, line=ln,
-                message="Multiple H1 headings found (expected exactly one)",
-            ))
+            result.errors.append(
+                ValidationIssue(
+                    rule_id="S01",
+                    severity=Severity.ERROR,
+                    line=ln,
+                    message="Multiple H1 headings found (expected exactly one)",
+                )
+            )
 
 
 def _check_s02(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
 ) -> None:
     """S02: H1 must be the first heading."""
     if not headings or headings[0][1] == 1:
@@ -132,11 +147,10 @@ def _check_s02(
     has_h1 = any(lvl == 1 for _, lvl, _ in headings)
     severity = Severity.ERROR if has_h1 else Severity.WARNING
     issue = ValidationIssue(
-        rule_id="S02", severity=severity, line=headings[0][0],
-        message=(
-            f"First heading is H{headings[0][1]} "
-            f"('{headings[0][2]}'), expected H1"
-        ),
+        rule_id="S02",
+        severity=severity,
+        line=headings[0][0],
+        message=(f"First heading is H{headings[0][1]} ('{headings[0][2]}'), expected H1"),
     )
     if has_h1:
         result.errors.append(issue)
@@ -145,47 +159,52 @@ def _check_s02(
 
 
 def _check_s03(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
 ) -> None:
     """S03: No heading level skips (e.g., H2 → H4 without H3)."""
     for i in range(1, len(headings)):
         prev_level = headings[i - 1][1]
         curr_level = headings[i][1]
         if curr_level > prev_level + 1:
-            result.warnings.append(ValidationIssue(
-                rule_id="S03", severity=Severity.WARNING,
-                line=headings[i][0],
-                message=(
-                    f"Heading level skipped: H{prev_level} → H{curr_level} "
-                    f"('{headings[i][2]}')"
-                ),
-            ))
+            result.warnings.append(
+                ValidationIssue(
+                    rule_id="S03",
+                    severity=Severity.WARNING,
+                    line=headings[i][0],
+                    message=(
+                        f"Heading level skipped: H{prev_level} → H{curr_level} ('{headings[i][2]}')"
+                    ),
+                )
+            )
 
 
 def _check_s04(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
 ) -> None:
     """S04: ``## Abstract`` appears before body sections."""
     h2s = [(ln, txt) for ln, lvl, txt in headings if lvl == 2]
     if not h2s:
         return
-    abstract_indices = [
-        i for i, (_, txt) in enumerate(h2s)
-        if txt.strip().lower() == "abstract"
-    ]
+    abstract_indices = [i for i, (_, txt) in enumerate(h2s) if txt.strip().lower() == "abstract"]
     if not abstract_indices:
         return
     # Abstract should be the first H2
     if abstract_indices[0] != 0:
-        result.warnings.append(ValidationIssue(
-            rule_id="S04", severity=Severity.WARNING,
-            line=h2s[abstract_indices[0]][0],
-            message="'## Abstract' is not the first H2 section",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S04",
+                severity=Severity.WARNING,
+                line=h2s[abstract_indices[0]][0],
+                message="'## Abstract' is not the first H2 section",
+            )
+        )
 
 
 def _check_s05(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
     lines: list[str] | None = None,
 ) -> None:
     """S05: ``## References`` is the last H2 section.
@@ -210,27 +229,29 @@ def _check_s05(
 
     # Only consider H2s in the main article (before first ---)
     h2s = [
-        (ln, txt) for ln, lvl, txt in headings
+        (ln, txt)
+        for ln, lvl, txt in headings
         if lvl == 2 and (sub_article_start is None or ln < sub_article_start)
     ]
     if not h2s:
         return
-    ref_indices = [
-        i for i, (_, txt) in enumerate(h2s)
-        if txt.strip().lower() == "references"
-    ]
+    ref_indices = [i for i, (_, txt) in enumerate(h2s) if txt.strip().lower() == "references"]
     if not ref_indices:
         return
     if ref_indices[-1] != len(h2s) - 1:
-        result.warnings.append(ValidationIssue(
-            rule_id="S05", severity=Severity.WARNING,
-            line=h2s[ref_indices[-1]][0],
-            message="'## References' is not the last H2 section",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S05",
+                severity=Severity.WARNING,
+                line=h2s[ref_indices[-1]][0],
+                message="'## References' is not the last H2 section",
+            )
+        )
 
 
 def _check_s06(
-    headings: list[tuple[int, int, str]], result: ValidationResult,
+    headings: list[tuple[int, int, str]],
+    result: ValidationResult,
 ) -> None:
     """S06: ``## Acknowledgments`` appears before ``## References``."""
     h2s = [(ln, txt) for ln, lvl, txt in headings if lvl == 2]
@@ -245,14 +266,14 @@ def _check_s06(
         if lower == "references" and ref_idx is None:
             ref_idx = i
     if ack_idx is not None and ref_idx is not None and ack_idx > ref_idx:
-        result.warnings.append(ValidationIssue(
-            rule_id="S06", severity=Severity.WARNING,
-            line=h2s[ack_idx][0],
-            message=(
-                "'## Acknowledgments' appears after '## References' "
-                "(should come before)"
-            ),
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S06",
+                severity=Severity.WARNING,
+                line=h2s[ack_idx][0],
+                message=("'## Acknowledgments' appears after '## References' (should come before)"),
+            )
+        )
 
 
 def _check_s07(lines: list[str], result: ValidationResult) -> None:
@@ -280,8 +301,7 @@ def _check_s07(lines: list[str], result: ValidationResult) -> None:
             j = i + 1
             sep_offset: int | None = None
             while j < len(lines) and (
-                _RE_TABLE_ROW.match(lines[j])
-                or _RE_TABLE_SEP.match(lines[j])
+                _RE_TABLE_ROW.match(lines[j]) or _RE_TABLE_SEP.match(lines[j])
             ):
                 if sep_offset is None and _RE_TABLE_SEP.match(lines[j]):
                     sep_offset = j - table_start
@@ -289,23 +309,26 @@ def _check_s07(lines: list[str], result: ValidationResult) -> None:
 
             if sep_offset is None:
                 # No separator found anywhere in this block of rows
-                result.errors.append(ValidationIssue(
-                    rule_id="S07", severity=Severity.ERROR,
-                    line=table_start + 1,
-                    message=(
-                        "Table has no |---| separator line"
-                    ),
-                ))
+                result.errors.append(
+                    ValidationIssue(
+                        rule_id="S07",
+                        severity=Severity.ERROR,
+                        line=table_start + 1,
+                        message=("Table has no |---| separator line"),
+                    )
+                )
             elif sep_offset > 1:
                 # Separator found, but after multiple header rows
-                result.warnings.append(ValidationIssue(
-                    rule_id="S07", severity=Severity.WARNING,
-                    line=table_start + 1,
-                    message=(
-                        f"Table has {sep_offset} header rows before "
-                        f"separator (GFM supports 1)"
-                    ),
-                ))
+                result.warnings.append(
+                    ValidationIssue(
+                        rule_id="S07",
+                        severity=Severity.WARNING,
+                        line=table_start + 1,
+                        message=(
+                            f"Table has {sep_offset} header rows before separator (GFM supports 1)"
+                        ),
+                    )
+                )
             # else: sep_offset == 1 → perfectly valid table
 
             i = j  # skip past entire table block
@@ -340,8 +363,7 @@ def _check_s08(lines: list[str], result: ValidationResult) -> None:
         if _RE_TABLE_ROW.match(line) or _RE_TABLE_SEP.match(line):
             next_idx = i + 1
             if next_idx < len(lines) and (
-                _RE_TABLE_ROW.match(lines[next_idx])
-                or _RE_TABLE_SEP.match(lines[next_idx])
+                _RE_TABLE_ROW.match(lines[next_idx]) or _RE_TABLE_SEP.match(lines[next_idx])
             ):
                 i += 1
                 continue
@@ -349,8 +371,7 @@ def _check_s08(lines: list[str], result: ValidationResult) -> None:
         if _RE_UNORDERED_LIST.match(line) or _RE_ORDERED_LIST.match(line):
             next_idx = i + 1
             if next_idx < len(lines) and (
-                _RE_UNORDERED_LIST.match(lines[next_idx])
-                or _RE_ORDERED_LIST.match(lines[next_idx])
+                _RE_UNORDERED_LIST.match(lines[next_idx]) or _RE_ORDERED_LIST.match(lines[next_idx])
             ):
                 i += 1
                 continue
@@ -363,33 +384,44 @@ def _check_s08(lines: list[str], result: ValidationResult) -> None:
         # Now check that next line is blank (or end-of-file)
         next_idx = i + 1
         if next_idx < len(lines) and lines[next_idx].strip() != "":
-            result.warnings.append(ValidationIssue(
-                rule_id="S08", severity=Severity.WARNING,
-                line=i + 1,
-                message=(
-                    "Block element not followed by a blank line"
-                ),
-            ))
+            result.warnings.append(
+                ValidationIssue(
+                    rule_id="S08",
+                    severity=Severity.WARNING,
+                    line=i + 1,
+                    message=("Block element not followed by a blank line"),
+                )
+            )
         i += 1
 
 
 def _check_s09(text: str, result: ValidationResult) -> None:
     """S09: Document ends with exactly one trailing newline."""
     if not text:
-        result.warnings.append(ValidationIssue(
-            rule_id="S09", severity=Severity.WARNING, line=1,
-            message="Document is empty",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S09",
+                severity=Severity.WARNING,
+                line=1,
+                message="Document is empty",
+            )
+        )
         return
     if not text.endswith("\n"):
-        result.warnings.append(ValidationIssue(
-            rule_id="S09", severity=Severity.WARNING,
-            line=len(text.split("\n")),
-            message="Document does not end with a trailing newline",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S09",
+                severity=Severity.WARNING,
+                line=len(text.split("\n")),
+                message="Document does not end with a trailing newline",
+            )
+        )
     elif text.endswith("\n\n"):
-        result.warnings.append(ValidationIssue(
-            rule_id="S09", severity=Severity.WARNING,
-            line=len(text.split("\n")),
-            message="Document ends with multiple trailing newlines",
-        ))
+        result.warnings.append(
+            ValidationIssue(
+                rule_id="S09",
+                severity=Severity.WARNING,
+                line=len(text.split("\n")),
+                message="Document ends with multiple trailing newlines",
+            )
+        )
