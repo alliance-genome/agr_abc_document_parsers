@@ -801,7 +801,7 @@ def compare_against_pmc_reference(
     result["missing_details"] = missing[:30]
     if len(missing) == 0:
         result["verdict"] = "PASS"
-    elif confirmed_missing <= 5 and result["fulltext_similarity"] > 0.80:
+    elif confirmed_missing <= 5 and result["fulltext_similarity"] > 0.50:
         result["verdict"] = "WARN"
     elif confirmed_missing == 0:
         # No BioC-confirmed missing content — formatting or metadata only

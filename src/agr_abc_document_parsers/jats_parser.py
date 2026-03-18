@@ -1976,32 +1976,13 @@ def _parse_table_row(
             except (ValueError, OverflowError):
                 colspan = 1
             cell_align = child.get("align", "")
-            # Preserve paragraph boundaries in multi-<p> cells;
-            # also extract <list> items that are direct children of td/th.
-            cell_parts: list[str] = []
-            has_block_children = False
-            for td_child in child:
-                td_tag = (
-                    etree.QName(td_child.tag).localname if isinstance(td_child.tag, str) else ""
-                )
-                if td_tag == "p":
-                    has_block_children = True
-                    t = _inline_text(td_child).strip()
-                    if t:
-                        cell_parts.append(t)
-                elif td_tag == "list":
-                    has_block_children = True
-                    for li in td_child.findall("list-item"):
-                        li_p = li.find("p")
-                        li_t = (
-                            _inline_text(li_p).strip() if li_p is not None else all_text(li).strip()
-                        )
-                        if li_t:
-                            cell_parts.append(li_t)
-            if has_block_children:
-                cell_text = "\n".join(cell_parts)
+            # Preserve paragraph boundaries in multi-<p> cells.
+            p_children = child.findall("p")
+            if p_children:
+                parts = [_inline_text(p).strip() for p in p_children]
+                cell_text = "\n".join(t for t in parts if t)
             else:
-                cell_text = _inline_text(child)
+                cell_text = all_text(child)
             cell = TableCell(
                 text=cell_text,
                 is_header=(tag == "th" or is_header),
