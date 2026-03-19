@@ -3918,3 +3918,512 @@ class TestMixedAbstract:
         assert len(doc.abstract) == 2
         assert "Background:" in doc.abstract[0].text
         assert doc.abstract[1].text == "Trailing abstract paragraph."
+
+
+# ---------------------------------------------------------------------------
+# Affiliation parsing improvements
+# ---------------------------------------------------------------------------
+
+
+class TestAffiliationParsing:
+    """Tests for affiliation extraction from various JATS layouts."""
+
+    def test_aff_inside_contrib_group(self):
+        """eLife: <aff> nested inside <contrib-group>."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="aff" rid="a1"/>
+            </contrib>
+            <aff id="a1"><label>1</label>
+              <institution-wrap>
+                <institution-id institution-id-type="ror">https://ror.org/123</institution-id>
+                <institution>MIT</institution>
+              </institution-wrap>
+              <addr-line>Cambridge</addr-line>
+              <country>USA</country>
+            </aff>
+          </contrib-group>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors[0].affiliations) == 1
+        assert "MIT" in doc.authors[0].affiliations[0]
+        assert "Cambridge" in doc.authors[0].affiliations[0]
+        # ROR URL should NOT be in affiliation text
+        assert "ror.org" not in doc.authors[0].affiliations[0]
+        # Label number should NOT be in affiliation text
+        assert not doc.authors[0].affiliations[0].startswith("1")
+
+    def test_aff_plain_text_with_label(self):
+        """Plain text <aff> with <label> — label stripped."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="aff" rid="A1"/>
+            </contrib>
+          </contrib-group>
+          <aff id="A1"><label>1</label>Dept of Biology, MIT, USA</aff>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].affiliations[0] == "Dept of Biology, MIT, USA"
+
+    def test_non_affiliation_filtered(self):
+        """Entries like 'These authors contributed equally' filtered out."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="aff" rid="A1"/>
+              <xref ref-type="aff" rid="A18"/>
+            </contrib>
+          </contrib-group>
+          <aff id="A1"><label>1</label>MIT, USA</aff>
+          <aff id="A18"><label>18</label>These authors contributed equally</aff>
+          <aff id="A19"><label>19</label>Lead contact</aff>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors[0].affiliations) == 1
+        assert "MIT" in doc.authors[0].affiliations[0]
+
+    def test_inline_aff_in_contrib(self):
+        """Inline <aff> directly inside <contrib> (Genetics style)."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <aff><institution>Stanford University</institution>,
+                <addr-line>Stanford</addr-line>,
+                <country country="US">United States</country>
+              </aff>
+            </contrib>
+          </contrib-group>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors[0].affiliations) == 1
+        assert "Stanford University" in doc.authors[0].affiliations[0]
+
+    def test_shared_affiliation_fallback(self):
+        """All authors get affiliations when no xref but aff exists."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+            </contrib>
+            <contrib contrib-type="author">
+              <name><surname>Roe</surname><given-names>John</given-names></name>
+            </contrib>
+            <aff id="A1">MIT, USA</aff>
+          </contrib-group>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors[0].affiliations) == 1
+        assert len(doc.authors[1].affiliations) == 1
+
+
+# ---------------------------------------------------------------------------
+# Email extraction from author-notes
+# ---------------------------------------------------------------------------
+
+
+class TestEmailExtraction:
+    """Tests for email standardization from various JATS patterns."""
+
+    def test_email_from_corresp(self):
+        """Email in <author-notes>/<corresp> extracted to Author.email."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Smith</surname><given-names>Alice</given-names></name>
+            </contrib>
+          </contrib-group>
+          <author-notes>
+            <corresp>*Corresponding author: alice@example.com</corresp>
+          </author-notes>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].email == "alice@example.com"
+        # Corresp note should be removed from author_notes
+        assert not any("alice@example.com" in n for n in doc.author_notes)
+
+    def test_email_from_address(self):
+        """Email inside <contrib>/<address>/<email> (Nature style)."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author" corresp="yes">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <address><email>jane@example.org</email></address>
+            </contrib>
+          </contrib-group>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].email == "jane@example.org"
+
+    def test_multi_email_corresp(self):
+        """Multiple emails in a single <corresp> matched to authors."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Smith</surname><given-names>Alice</given-names></name>
+            </contrib>
+            <contrib contrib-type="author">
+              <name><surname>Jones</surname><given-names>Bob</given-names></name>
+            </contrib>
+          </contrib-group>
+          <author-notes>
+            <corresp>Corresponding authors: Alice Smith, alice@mit.edu;
+              Bob Jones, bob@stanford.edu</corresp>
+          </author-notes>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].email == "alice@mit.edu"
+        assert doc.authors[1].email == "bob@stanford.edu"
+
+    def test_email_match_by_surname_in_local_part(self):
+        """Email local part contains author surname."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Wang</surname><given-names>Meng</given-names></name>
+            </contrib>
+          </contrib-group>
+          <author-notes>
+            <corresp>*Corresponding author: mengwang@example.org</corresp>
+          </author-notes>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].email == "mengwang@example.org"
+
+    def test_non_email_notes_preserved(self):
+        """Notes without emails are kept in author_notes."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="fn" rid="fn1"/>
+            </contrib>
+          </contrib-group>
+          <author-notes>
+            <fn id="fn1"><p>Present address: Oxford, UK</p></fn>
+          </author-notes>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert any("Present address" in n for n in doc.author_notes)
+
+
+# ---------------------------------------------------------------------------
+# CRediT roles from fn-type="con" footnotes
+# ---------------------------------------------------------------------------
+
+
+class TestContributionFootnotes:
+    """Tests for author role extraction from fn-type='con' footnotes."""
+
+    def test_roles_from_fn_con(self):
+        """eLife style: roles in back/fn-group with fn-type='con'."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="fn" rid="con1"/>
+            </contrib>
+          </contrib-group>
+        </article-meta></front>
+        <body><sec><title>S</title><p>Text.</p></sec></body>
+        <back><fn-group>
+          <fn fn-type="con" id="con1">
+            <p>Conceptualization, Investigation, Writing.</p>
+          </fn>
+        </fn-group></back></article>"""
+        doc = parse_jats(xml)
+        assert len(doc.authors[0].roles) == 1
+        assert "Conceptualization" in doc.authors[0].roles[0]
+
+    def test_roles_from_role_element(self):
+        """Standard: roles in <role> elements (takes precedence)."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <role>Conceptualization</role>
+              <role>Investigation</role>
+            </contrib>
+          </contrib-group>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert doc.authors[0].roles == ["Conceptualization", "Investigation"]
+
+
+# ---------------------------------------------------------------------------
+# Author notes with linked author names
+# ---------------------------------------------------------------------------
+
+
+class TestAuthorNotesLinkedNames:
+    """Tests for footnote label resolution to author names."""
+
+    def test_footnote_labels_resolved(self):
+        """Footnote labels linked to author names via xref."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+          <contrib-group>
+            <contrib contrib-type="author">
+              <name><surname>Doe</surname><given-names>Jane</given-names></name>
+              <xref ref-type="fn" rid="fn1"/>
+              <xref ref-type="fn" rid="fn2"/>
+            </contrib>
+            <contrib contrib-type="author">
+              <name><surname>Roe</surname><given-names>John</given-names></name>
+              <xref ref-type="fn" rid="fn1"/>
+            </contrib>
+          </contrib-group>
+          <author-notes>
+            <fn id="fn1"><label>1</label>
+              <p>These authors contributed equally</p>
+            </fn>
+            <fn id="fn2"><label>2</label>
+              <p>Lead contact</p>
+            </fn>
+          </author-notes>
+        </article-meta></front><body/></article>"""
+        doc = parse_jats(xml)
+        assert any("Jane Doe, John Roe" in n for n in doc.author_notes)
+        assert any("Lead contact" in n for n in doc.author_notes)
+        # Labels should not appear as numbers
+        assert not any(n.startswith("1") for n in doc.author_notes)
+
+
+# ---------------------------------------------------------------------------
+# fn-group routing to dedicated fields
+# ---------------------------------------------------------------------------
+
+
+class TestFnGroupRouting:
+    """Tests for routing fn-group content to dedicated Document fields."""
+
+    def test_funding_routed_from_fn_group(self):
+        """Funding footnote with bold title routed to funding_statement."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title><p>Text.</p></sec></body>
+        <back>
+          <fn-group>
+            <fn fn-type="financial-disclosure">
+              <p><bold>Funding</bold></p>
+              <p>Supported by NIH grant R01.</p>
+            </fn>
+          </fn-group>
+        </back></article>"""
+        doc = parse_jats(xml)
+        assert "NIH grant R01" in doc.funding_statement
+
+    def test_data_availability_routed_from_fn_group(self):
+        """Data availability footnote routed to data_availability."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title><p>Text.</p></sec></body>
+        <back>
+          <fn-group>
+            <fn>
+              <p><bold>Data and resource availability</bold></p>
+              <p>All data deposited at GEO.</p>
+            </fn>
+          </fn-group>
+        </back></article>"""
+        doc = parse_jats(xml)
+        assert "GEO" in doc.data_availability
+
+
+# ---------------------------------------------------------------------------
+# Table cell and citation formatting
+# ---------------------------------------------------------------------------
+
+
+class TestInlineFormatting:
+    """Tests for inline formatting preservation."""
+
+    def test_table_cell_italic(self):
+        """Italic formatting preserved in table cells."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <table-wrap><table><thead>
+            <tr><th>Type</th><th>Name</th></tr>
+          </thead><tbody>
+            <tr><td>Strain (<italic>D. rerio</italic>)</td>
+                <td>foxf2a<sup>ca71</sup></td></tr>
+          </tbody></table></table-wrap>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        table = doc.sections[0].tables[0]
+        # Find the data row (not header)
+        data_rows = [r for r in table.rows if not all(c.is_header for c in r)]
+        assert len(data_rows) >= 1
+        cell_texts = [c.text for c in data_rows[0]]
+        assert any("*D. rerio*" in t for t in cell_texts)
+        assert any("<sup>ca71</sup>" in t for t in cell_texts)
+
+    def test_citation_superscript_preserved(self):
+        """Superscript inside <xref ref-type='bibr'> preserved."""
+        xml = b"""<article><front><article-meta>
+          <title-group><article-title>T</article-title></title-group>
+        </article-meta></front>
+        <body><sec><title>S</title>
+          <p>As described<xref rid="bib1" ref-type="bibr"><sup>1</sup></xref>
+             previously.</p>
+        </sec></body></article>"""
+        doc = parse_jats(xml)
+        assert "<sup>1</sup>" in doc.sections[0].paragraphs[0].text
+
+
+# ---------------------------------------------------------------------------
+# Metadata emission and round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataRoundTrip:
+    """Tests for new metadata fields emission and round-trip."""
+
+    def test_orcid_round_trip(self):
+        """ORCIDs survive JATS -> MD -> Document round-trip."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.md_reader import read_markdown
+        from agr_abc_document_parsers.models import Author, Document
+
+        doc = Document(
+            title="Paper",
+            authors=[
+                Author(
+                    given_name="Alice",
+                    surname="Smith",
+                    orcid="https://orcid.org/0000-0001-2345-6789",
+                ),
+                Author(given_name="Bob", surname="Jones"),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "**ORCIDs:**" in md
+        doc2 = read_markdown(md)
+        assert doc2.authors[0].orcid == "https://orcid.org/0000-0001-2345-6789"
+        assert doc2.authors[1].orcid == ""
+
+    def test_received_accepted_round_trip(self):
+        """Received/accepted dates survive round-trip."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.md_reader import read_markdown
+        from agr_abc_document_parsers.models import Document
+
+        doc = Document(
+            title="Paper",
+            received_date="2024-01-15",
+            accepted_date="2024-06-20",
+            copyright="2024 The Authors",
+            license_url="https://creativecommons.org/licenses/by/4.0/",
+        )
+        md = emit_markdown(doc)
+        doc2 = read_markdown(md)
+        assert doc2.received_date == "2024-01-15"
+        assert doc2.accepted_date == "2024-06-20"
+        assert doc2.copyright == "2024 The Authors"
+        assert doc2.license_url == "https://creativecommons.org/licenses/by/4.0/"
+
+    def test_affiliation_superscript_round_trip(self):
+        """Per-author affiliation mapping survives round-trip."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.md_reader import read_markdown
+        from agr_abc_document_parsers.models import Author, Document
+
+        doc = Document(
+            title="Paper",
+            authors=[
+                Author(
+                    given_name="Alice",
+                    surname="Smith",
+                    affiliations=["MIT", "Harvard"],
+                ),
+                Author(
+                    given_name="Bob",
+                    surname="Jones",
+                    affiliations=["MIT"],
+                ),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "Alice Smith<sup>1,2</sup>" in md
+        assert "Bob Jones<sup>1</sup>" in md
+        doc2 = read_markdown(md)
+        assert doc2.authors[0].affiliations == ["MIT", "Harvard"]
+        assert doc2.authors[1].affiliations == ["MIT"]
+
+    def test_author_contributions_round_trip(self):
+        """Author contributions section survives round-trip."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.md_reader import read_markdown
+        from agr_abc_document_parsers.models import Author, Document
+
+        doc = Document(
+            title="Paper",
+            authors=[
+                Author(
+                    given_name="Alice",
+                    surname="Smith",
+                    roles=["Conceptualization", "Writing"],
+                ),
+                Author(
+                    given_name="Bob",
+                    surname="Jones",
+                    roles=["Investigation"],
+                ),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "## Author Contributions" in md
+        doc2 = read_markdown(md)
+        assert "Conceptualization" in doc2.authors[0].roles
+        assert "Writing" in doc2.authors[0].roles
+        assert "Investigation" in doc2.authors[1].roles
+
+    def test_secondary_abstract_after_references(self):
+        """Secondary abstracts emitted after references."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.models import (
+            Document,
+            Paragraph,
+            Reference,
+            SecondaryAbstract,
+        )
+
+        doc = Document(
+            title="Paper",
+            abstract=[Paragraph(text="Abstract.")],
+            secondary_abstracts=[
+                SecondaryAbstract(
+                    label="eLife digest",
+                    paragraphs=[Paragraph(text="Plain language.")],
+                )
+            ],
+            references=[
+                Reference(index=1, authors=["A"], title="T", year="2024"),
+            ],
+        )
+        md = emit_markdown(doc)
+        lines = md.split("\n")
+        ref_idx = next(i for i, ln in enumerate(lines) if "## References" in ln)
+        digest_idx = next(i for i, ln in enumerate(lines) if "eLife digest" in ln)
+        assert ref_idx < digest_idx

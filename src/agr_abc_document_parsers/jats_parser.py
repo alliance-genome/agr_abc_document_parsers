@@ -762,9 +762,7 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
 
     # Build map: fn id -> list of author names that reference it
     fn_to_authors: dict[str, list[str]] = {}
-    for contrib in root.findall(
-        ".//article-meta/contrib-group/contrib[@contrib-type='author']"
-    ):
+    for contrib in root.findall(".//article-meta/contrib-group/contrib[@contrib-type='author']"):
         name_elem = contrib.find("name")
         if name_elem is None:
             continue
@@ -787,7 +785,7 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
                 raw = all_text(child)
                 label_text = all_text(label)
                 if label_text and raw.startswith(label_text):
-                    raw = raw[len(label_text):].strip()
+                    raw = raw[len(label_text) :].strip()
                 t = raw
             else:
                 t = all_text(child)
@@ -808,7 +806,7 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
                 if label is not None:
                     label_text = all_text(label)
                     if label_text and t.startswith(label_text):
-                        t = t[len(label_text):].strip()
+                        t = t[len(label_text) :].strip()
             if not t:
                 continue
             # Prepend linked author names
@@ -1654,7 +1652,11 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
         if tag == "xref":
             # Preserve inline formatting (sup/sub) inside citations
             ref_text = all_text(child)
-            display_text = _inline_text(child) if child.find("sup") is not None or child.find("sub") is not None else ref_text
+            display_text = (
+                _inline_text(child)
+                if child.find("sup") is not None or child.find("sub") is not None
+                else ref_text
+            )
             rid = child.get("rid", "")
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
@@ -1801,7 +1803,11 @@ def _parse_paragraph(
 
         if tag == "xref":
             ref_text = all_text(child)
-            display_text = _inline_text(child) if child.find("sup") is not None or child.find("sub") is not None else ref_text
+            display_text = (
+                _inline_text(child)
+                if child.find("sup") is not None or child.find("sub") is not None
+                else ref_text
+            )
             rid = child.get("rid", "")
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
