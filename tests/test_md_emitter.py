@@ -31,7 +31,7 @@ class TestMdEmitter:
         assert "# My Paper Title" in md
 
     def test_emit_authors(self):
-        """Authors as plain comma-separated names."""
+        """Authors with superscript affiliation numbers."""
         doc = _make_doc(
             authors=[
                 Author(given_name="Alice", surname="Smith", affiliations=["Dept of Biology, MIT"]),
@@ -39,9 +39,32 @@ class TestMdEmitter:
             ]
         )
         md = emit_markdown(doc)
+        assert "Alice Smith<sup>1</sup>, Bob Jones<sup>2</sup>" in md
+        assert "1. Dept of Biology, MIT" in md
+        assert "2. Dept of CS, Stanford" in md
+
+    def test_emit_authors_shared_affiliation(self):
+        """Authors sharing an affiliation get the same superscript."""
+        doc = _make_doc(
+            authors=[
+                Author(given_name="Alice", surname="Smith", affiliations=["MIT"]),
+                Author(given_name="Bob", surname="Jones", affiliations=["MIT"]),
+            ]
+        )
+        md = emit_markdown(doc)
+        assert "Alice Smith<sup>1</sup>, Bob Jones<sup>1</sup>" in md
+
+    def test_emit_authors_no_affiliations(self):
+        """Authors without affiliations have no superscripts."""
+        doc = _make_doc(
+            authors=[
+                Author(given_name="Alice", surname="Smith"),
+                Author(given_name="Bob", surname="Jones"),
+            ]
+        )
+        md = emit_markdown(doc)
         assert "Alice Smith, Bob Jones" in md
-        # No 'Authors:' prefix (consensus pipeline format)
-        assert "Authors:" not in md
+        assert "<sup>" not in md
 
     def test_emit_author_emails(self):
         """Corresponding author emails emitted on Correspondence line."""
@@ -433,7 +456,7 @@ class TestMdEmitter:
         )
         md = emit_markdown(doc)
         assert md.startswith("# A Study of Gene Expression")
-        assert "Alice Smith, Bob Jones" in md
+        assert "Alice Smith<sup>1</sup>, Bob Jones<sup>2</sup>" in md
         assert "## Abstract" in md
         assert "**Keywords:**" in md
         assert "## Introduction" in md
@@ -542,11 +565,11 @@ class TestMdEmitterNewFeatures:
         )
         md = emit_markdown(doc)
         lines = md.split("\n")
-        # Find positions
+        # Find positions — secondary abstracts now after references
         abstract_idx = next(i for i, ln in enumerate(lines) if "## Abstract" in ln)
-        sa_idx = next(i for i, ln in enumerate(lines) if "## Author Summary" in ln)
         kw_idx = next(i for i, ln in enumerate(lines) if "**Keywords:**" in ln)
-        assert abstract_idx < sa_idx < kw_idx
+        sa_idx = next(i for i, ln in enumerate(lines) if "## Author Summary" in ln)
+        assert abstract_idx < kw_idx < sa_idx
         assert "Plain language summary." in md
 
     def test_emit_sub_articles(self):
@@ -615,7 +638,7 @@ class TestMdEmitterNewFeatures:
         assert "**Categories:** Research Article, Cell Biology" in md
 
     def test_emit_author_roles(self):
-        """Author role footnotes after references."""
+        """Author roles as headed section after references."""
         doc = _make_doc(
             title="Paper",
             authors=[
@@ -630,10 +653,9 @@ class TestMdEmitterNewFeatures:
             ],
         )
         md = emit_markdown(doc)
-        assert "[^1]: Rachel Waymack: Conceptualization, Software" in md
-        assert "[^2]: Alvaro Fletcher: Investigation" in md
-        # Jane Smith has no roles — no footnote emitted for her
-        assert "[^3]:" not in md
+        assert "## Author Contributions" in md
+        assert "Rachel Waymack: Conceptualization, Software" in md
+        assert "Alvaro Fletcher: Investigation" in md
 
     def test_emit_no_roles_no_footnotes(self):
         """No role footnotes when no author has roles."""

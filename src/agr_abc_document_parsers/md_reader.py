@@ -39,6 +39,8 @@ _FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+)$")
 _CATEGORIES_RE = re.compile(r"^\*\*Categories:\*\*\s*(.+)$")
 _CORRESPONDENCE_RE = re.compile(r"^\*\*Correspondence:\*\*\s*(.+)$")
 _CORRESP_ENTRY_RE = re.compile(r"(.+?)\s*\(([^)]+@[^)]+)\)")
+_ORCIDS_RE = re.compile(r"^\*\*ORCIDs:\*\*\s*(.+)$")
+_ORCID_ENTRY_RE = re.compile(r"(.+?)\s*\((https?://orcid\.org/[^)]+)\)")
 _ROLE_FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+?):\s+(.+)$")
 _HR_RE = re.compile(r"^---\s*$")
 _FIG_DOI_RE = re.compile(r"^<!--\s*doi:\s*(.+?)\s*-->$")
@@ -89,7 +91,11 @@ def read_markdown(text: str) -> Document:
         "PMCID",
         "Citation",
         "Published",
+        "Received",
+        "Accepted",
         "License",
+        "License URL",
+        "Copyright",
     }
     while pos < n:
         m = _META_RE.match(lines[pos])
@@ -128,13 +134,41 @@ def read_markdown(text: str) -> Document:
         pos = _skip_blank(lines, pos, n)
 
     # --- Affiliation lines (numbered list after authors, before first H2) ---
+    affil_list: list[str] = []
     while pos < n and _AFFIL_LINE_RE.match(lines[pos]):
+        m_aff = _AFFIL_LINE_RE.match(lines[pos])
+        if m_aff:
+            affil_list.append(m_aff.group(1))
         pos += 1
+    if affil_list and doc.authors:
+        # Resolve per-author affiliation indices set by _parse_author_line
+        has_indices = any(a.affiliations and a.affiliations[0].isdigit() for a in doc.authors)
+        if has_indices:
+            for author in doc.authors:
+                indices = author.affiliations
+                author.affiliations = []
+                for idx_str in indices:
+                    try:
+                        idx = int(idx_str) - 1
+                        if 0 <= idx < len(affil_list):
+                            author.affiliations.append(affil_list[idx])
+                    except ValueError:
+                        pass
+        else:
+            # No superscripts — assign all affiliations to all authors
+            for author in doc.authors:
+                author.affiliations = list(affil_list)
     pos = _skip_blank(lines, pos, n)
 
     # --- Correspondence line (**Correspondence:** Name (email), ...) ---
     if pos < n and _CORRESPONDENCE_RE.match(lines[pos]):
         _parse_correspondence_line(lines[pos], doc.authors)
+        pos += 1
+        pos = _skip_blank(lines, pos, n)
+
+    # --- ORCIDs line (**ORCIDs:** Name (url), ...) ---
+    if pos < n and _ORCIDS_RE.match(lines[pos]):
+        _parse_orcids_line(lines[pos], doc.authors)
         pos += 1
         pos = _skip_blank(lines, pos, n)
 
@@ -168,12 +202,12 @@ def read_markdown(text: str) -> Document:
     # --- H2+ sections (main article only) ---
     h2_blocks = _collect_h2_blocks(main_lines, pos, main_n)
 
-    # Known secondary abstract labels
+    # Known secondary abstract labels (compared case-insensitively)
     _SECONDARY_LABELS = {
-        "Author Summary",
-        "eLife Digest",
-        "Table of Contents Summary",
-        "Plain Language Summary",
+        "author summary",
+        "elife digest",
+        "table of contents summary",
+        "plain language summary",
     }
 
     found_ack = False
@@ -187,7 +221,7 @@ def read_markdown(text: str) -> Document:
             else:
                 # Second Abstract block → store as secondary
                 doc.secondary_abstracts.append(_parse_secondary_abstract(heading, content_lines))
-        elif heading in _SECONDARY_LABELS and not found_ack and not found_ref:
+        elif heading.lower() in _SECONDARY_LABELS:
             # Extract keywords that may be embedded in this block
             for cl in content_lines:
                 m_kw = _KEYWORDS_RE.match(cl)
@@ -205,6 +239,8 @@ def read_markdown(text: str) -> Document:
             doc.competing_interests = _parse_single_text_block(content_lines)
         elif heading == "Data Availability":
             doc.data_availability = _parse_single_text_block(content_lines)
+        elif heading == "Author Contributions":
+            _parse_author_contributions(content_lines, doc)
         elif heading == "References":
             refs = _parse_references_lines(content_lines)
             if refs:
@@ -397,12 +433,12 @@ def _parse_secondary_abstract(
 ) -> SecondaryAbstract:
     """Parse a secondary abstract H2 block into a SecondaryAbstract."""
     _LABEL_TO_TYPE = {
-        "Author Summary": "summary",
-        "eLife Digest": "executive-summary",
-        "Table of Contents Summary": "toc",
-        "Plain Language Summary": "plain-language-summary",
+        "author summary": "summary",
+        "elife digest": "executive-summary",
+        "table of contents summary": "toc",
+        "plain language summary": "plain-language-summary",
     }
-    ab_type = _LABEL_TO_TYPE.get(heading, heading.lower().replace(" ", "-"))
+    ab_type = _LABEL_TO_TYPE.get(heading.lower(), heading.lower().replace(" ", "-"))
     paragraphs: list[Paragraph] = []
     for line in content_lines:
         if not line.strip():
@@ -452,6 +488,31 @@ def _parse_role_footnotes(
                     break
 
 
+_ROLE_LINE_RE = re.compile(r"^(.+?):\s+(.+)$")
+
+
+def _parse_author_contributions(
+    content_lines: list[str],
+    doc: Document,
+) -> None:
+    """Parse ``## Author Contributions`` lines into Author.roles."""
+    name_map: dict[str, Author] = {}
+    for author in doc.authors:
+        full = f"{author.given_name} {author.surname}".strip()
+        if full:
+            name_map[full] = author
+    for line in content_lines:
+        line = line.strip()
+        if not line:
+            continue
+        m = _ROLE_LINE_RE.match(line)
+        if m:
+            name = m.group(1).strip()
+            roles = [r.strip() for r in m.group(2).split(",") if r.strip()]
+            if name in name_map:
+                name_map[name].roles = roles
+
+
 def _apply_metadata(doc: Document, key: str, value: str) -> None:
     """Apply a parsed metadata line to the document."""
     if key == "Journal":
@@ -466,6 +527,14 @@ def _apply_metadata(doc: Document, key: str, value: str) -> None:
         doc.pub_date = value
     elif key == "License":
         doc.license = value
+    elif key == "Received":
+        doc.received_date = value
+    elif key == "Accepted":
+        doc.accepted_date = value
+    elif key == "License URL":
+        doc.license_url = value
+    elif key == "Copyright":
+        doc.copyright = value
     elif key == "Citation":
         # Parse "10(2), e1004133" -> volume, issue, pages
         m = re.match(r"(\d+)(?:\(([^)]+)\))?(?:,\s*(.+))?$", value)
@@ -515,18 +584,37 @@ def _skip_blank(lines: list[str], pos: int, n: int) -> int:
 # ---------------------------------------------------------------------------
 
 
+_SUP_RE = re.compile(r"<sup>([^<]+)</sup>")
+
+
 def _parse_author_line(line: str) -> list[Author]:
-    """Parse comma-separated author names into Author objects."""
+    """Parse comma-separated author names (with optional affiliation superscripts).
+
+    Returns:
+        List of Author objects.  Each author's ``affiliations`` list
+        temporarily stores affiliation *index strings* (e.g. ``["1", "2"]``)
+        when superscripts are present.  The caller replaces these with
+        actual affiliation text after parsing the numbered affiliation lines.
+    """
     authors: list[Author] = []
     for name in line.split(", "):
         name = name.strip()
         if not name:
             continue
+        # Extract affiliation numbers from <sup>1,2</sup>
+        aff_nums: list[str] = []
+        sup_m = _SUP_RE.search(name)
+        if sup_m:
+            aff_nums = [n.strip() for n in sup_m.group(1).split(",") if n.strip()]
+            name = _SUP_RE.sub("", name).strip()
         parts = name.rsplit(" ", 1)
         if len(parts) == 2:
-            authors.append(Author(given_name=parts[0], surname=parts[1]))
+            author = Author(given_name=parts[0], surname=parts[1])
         else:
-            authors.append(Author(surname=parts[0]))
+            author = Author(surname=parts[0])
+        # Store index strings temporarily; resolved after affil lines
+        author.affiliations = aff_nums
+        authors.append(author)
     return authors
 
 
@@ -546,6 +634,23 @@ def _parse_correspondence_line(line: str, authors: list[Author]) -> None:
         email = entry_m.group(2).strip()
         if name in name_map:
             name_map[name].email = email
+
+
+def _parse_orcids_line(line: str, authors: list[Author]) -> None:
+    """Parse **ORCIDs:** line and assign ORCIDs to matching authors."""
+    m = _ORCIDS_RE.match(line)
+    if not m:
+        return
+    name_map: dict[str, Author] = {}
+    for author in authors:
+        full = f"{author.given_name} {author.surname}".strip()
+        if full:
+            name_map[full] = author
+    for entry_m in _ORCID_ENTRY_RE.finditer(m.group(1)):
+        name = entry_m.group(1).strip().lstrip(",").strip()
+        orcid = entry_m.group(2).strip()
+        if name in name_map:
+            name_map[name].orcid = orcid
 
 
 def _parse_keywords(line: str) -> list[str]:

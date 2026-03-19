@@ -129,9 +129,10 @@ def parse_jats(
     # Article-level metadata
     _parse_article_meta(root, doc)
 
-    # Parse affiliations first, then resolve into authors
+    # Parse affiliations and contribution footnotes, then resolve into authors
     aff_map = _parse_affiliations(root)
-    doc.authors = _parse_authors(root, aff_map)
+    con_map = _parse_con_footnotes(root)
+    doc.authors = _parse_authors(root, aff_map, con_map)
 
     doc.sections = _parse_body(root)
     doc.references = _parse_bibliography(root)
@@ -142,6 +143,7 @@ def parse_jats(
     # to allow deduplication — see _parse_back_sections skip logic)
     doc.funding, doc.funding_statement = _parse_funding(root)
     doc.author_notes = _parse_author_notes_field(root)
+    _extract_emails_from_notes(doc)
     doc.competing_interests = _parse_competing_interests(root)
     doc.data_availability = _parse_data_availability(root)
 
@@ -525,14 +527,14 @@ def _collect_inline_aff(
     for aff_el in contrib.findall("aff"):
         parts: list[str] = []
         # institution-wrap may contain institution-id and institution
-        for iw in aff_el.findall(".//institution-id"):
-            iw_text = (iw.text or "").strip()
-            if iw_text:
-                parts.append(iw_text)
         for inst in aff_el.findall(".//institution"):
             inst_text = (inst.text or "").strip()
             if inst_text:
                 parts.append(inst_text)
+        for addr in aff_el.findall(".//addr-line"):
+            addr_text = (addr.text or "").strip()
+            if addr_text:
+                parts.append(addr_text)
         for country in aff_el.findall(".//country"):
             c_text = (country.text or "").strip()
             if c_text:
@@ -751,25 +753,231 @@ def _parse_author_notes_field(root: etree._Element) -> list[str]:
     """Parse ``<author-notes>`` from article-meta into flat strings.
 
     Skips COI footnotes (handled by ``_parse_competing_interests``).
+    Resolves footnote labels to linked author names when possible.
     """
     notes: list[str] = []
     an = root.find(".//article-meta/author-notes")
     if an is None:
         return notes
+
+    # Build map: fn id -> list of author names that reference it
+    fn_to_authors: dict[str, list[str]] = {}
+    for contrib in root.findall(
+        ".//article-meta/contrib-group/contrib[@contrib-type='author']"
+    ):
+        name_elem = contrib.find("name")
+        if name_elem is None:
+            continue
+        given = text(name_elem.find("given-names"))
+        surname = text(name_elem.find("surname"))
+        full_name = f"{given} {surname}".strip()
+        if not full_name:
+            continue
+        for xref in contrib.findall("xref[@ref-type='fn']"):
+            rid = xref.get("rid", "")
+            if rid:
+                fn_to_authors.setdefault(rid, []).append(full_name)
+
     for child in an:
         tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "corresp":
-            t = all_text(child)
+            # Strip <label> from corresp
+            label = child.find("label")
+            if label is not None:
+                raw = all_text(child)
+                label_text = all_text(label)
+                if label_text and raw.startswith(label_text):
+                    raw = raw[len(label_text):].strip()
+                t = raw
+            else:
+                t = all_text(child)
             if t:
                 notes.append(t)
         elif tag == "fn":
             fn_type = child.get("fn-type", "")
             if fn_type in _COI_FN_TYPES:
                 continue
-            t = all_text(child)
-            if t:
-                notes.append(t)
+            # Extract text, skipping <label>
+            paras = child.findall("p")
+            if paras:
+                t = " ".join(all_text(p) for p in paras if all_text(p))
+            else:
+                t = all_text(child)
+                # Strip leading label text
+                label = child.find("label")
+                if label is not None:
+                    label_text = all_text(label)
+                    if label_text and t.startswith(label_text):
+                        t = t[len(label_text):].strip()
+            if not t:
+                continue
+            # Prepend linked author names
+            fn_id = child.get("id", "")
+            linked_authors = fn_to_authors.get(fn_id, [])
+            if linked_authors:
+                prefix = ", ".join(linked_authors)
+                t = f"{prefix}: {t}"
+            notes.append(t)
     return notes
+
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+
+# Patterns that indicate a note is a correspondence note (not a
+# "present address" or "contributed equally" note).
+_CORRESP_PATTERNS = re.compile(
+    r"correspond|for\s+correspondence|^\*\s*[A-Z].*@",
+    re.IGNORECASE,
+)
+
+
+def _extract_emails_from_notes(doc: Document) -> None:
+    """Move emails from ``author_notes`` into ``Author.email`` fields.
+
+    Scans each author note for email addresses.  When an email is found
+    and can be matched to an author (by name or surname appearing in the
+    same note), it is assigned to ``Author.email``.  Notes that only
+    contained correspondence information are removed from
+    ``doc.author_notes``; notes with other content (equal contribution,
+    present address) are kept.
+    """
+    if not doc.author_notes or not doc.authors:
+        return
+
+    # Build lookup helpers
+    authors_by_surname: dict[str, list[Author]] = {}
+    authors_by_name: dict[str, Author] = {}
+    authors_by_initials: dict[str, Author] = {}
+    for author in doc.authors:
+        sn = author.surname.lower()
+        if sn:
+            authors_by_surname.setdefault(sn, []).append(author)
+        full = f"{author.given_name} {author.surname}".strip()
+        if full:
+            authors_by_name[full.lower()] = author
+        # Build initials like "C.M.L." from "Catherine M Lutz"
+        initials = "".join(
+            p[0] + "." for p in (author.given_name + " " + author.surname).split() if p
+        )
+        if initials:
+            authors_by_initials[initials.upper()] = author
+
+    remaining: list[str] = []
+    for note in doc.author_notes:
+        emails = _EMAIL_RE.findall(note)
+        if not emails:
+            remaining.append(note)
+            continue
+
+        # For notes with multiple emails, split into per-email
+        # segments so each email is matched against its local context.
+        segments = _split_note_by_emails(note, emails)
+
+        # Try to match each email to an author
+        assigned = 0
+        for email, segment in zip(emails, segments):
+            # Skip if any author already has this email
+            if any(a.email == email for a in doc.authors):
+                assigned += 1
+                continue
+            matched = _match_email_to_author(
+                email,
+                segment,
+                doc.authors,
+                authors_by_surname,
+                authors_by_name,
+                authors_by_initials,
+            )
+            if matched:
+                assigned += 1
+
+        # Keep note if it has non-correspondence content
+        is_corresp_only = bool(_CORRESP_PATTERNS.search(note))
+        if not is_corresp_only or assigned < len(emails):
+            remaining.append(note)
+
+    doc.author_notes = remaining
+
+
+def _split_note_by_emails(note: str, emails: list[str]) -> list[str]:
+    """Split a note into segments, one per email.
+
+    For a note like ``"Name1 email1@x; Name2 email2@x"``, returns
+    ``["Name1 email1@x", "Name2 email2@x"]`` so each email is matched
+    against only its local context.
+    """
+    if len(emails) <= 1:
+        return [note]
+    segments: list[str] = []
+    positions = []
+    for email in emails:
+        idx = note.find(email)
+        positions.append(idx if idx >= 0 else len(note))
+    for i, _pos in enumerate(positions):
+        start = positions[i - 1] + len(emails[i - 1]) if i > 0 else 0
+        end = positions[i] + len(emails[i])
+        segments.append(note[start:end])
+    return segments
+
+
+def _match_email_to_author(
+    email: str,
+    note_text: str,
+    authors: list[Author],
+    by_surname: dict[str, list[Author]],
+    by_name: dict[str, Author],
+    by_initials: dict[str, Author],
+) -> bool:
+    """Try to match an email to an author and assign it.
+
+    Matching strategies (in order):
+    1. Full name appears in the note text
+    2. Surname appears near the email in the note
+    3. Initials like (C.M.L.) appear in the note
+    4. Email local part contains surname
+    5. Single author without email — assign by default
+
+    Returns True if matched.
+    """
+    note_lower = note_text.lower()
+    local_part = email.split("@")[0].lower()
+
+    # Strategy 1: full name in note
+    for full_name, author in by_name.items():
+        if not author.email and full_name in note_lower:
+            author.email = email
+            return True
+
+    # Strategy 2: surname as whole word near email
+    for surname, author_list in by_surname.items():
+        if len(surname) >= 3 and re.search(r"\b" + re.escape(surname) + r"\b", note_lower):
+            for author in author_list:
+                if not author.email:
+                    author.email = email
+                    return True
+
+    # Strategy 3: initials like (C.M.L.)
+    for initials, author in by_initials.items():
+        if not author.email and initials in note_text:
+            author.email = email
+            return True
+
+    # Strategy 4: email local part contains surname (strip punctuation)
+    for surname, author_list in by_surname.items():
+        clean_surname = re.sub(r"['\u2018\u2019\u0060\-]", "", surname)
+        if clean_surname and clean_surname in local_part:
+            for author in author_list:
+                if not author.email:
+                    author.email = email
+                    return True
+
+    # Strategy 5: single unmatched author
+    without_email = [a for a in authors if not a.email]
+    if len(without_email) == 1:
+        without_email[0].email = email
+        return True
+
+    return False
 
 
 _COI_TITLES = {
@@ -891,23 +1099,92 @@ def _parse_data_availability(root: etree._Element) -> str:
     return "\n\n".join(parts)
 
 
+def _aff_text(aff_elem: etree._Element) -> str:
+    """Extract clean affiliation text, skipping labels and institution IDs."""
+    parts: list[str] = []
+    for child in aff_elem:
+        tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
+        if tag in ("label", "institution-id"):
+            continue
+        if tag == "institution-wrap":
+            for sub in child:
+                sub_tag = etree.QName(sub.tag).localname if isinstance(sub.tag, str) else ""
+                if sub_tag == "institution-id":
+                    continue
+                t = all_text(sub)
+                if t:
+                    parts.append(t)
+        else:
+            t = all_text(child)
+            if t:
+                parts.append(t)
+    if parts:
+        return ", ".join(parts)
+    # Fallback for plain-text affs (no child elements, just text node):
+    # skip leading label text by removing the <label> content.
+    label = aff_elem.find("label")
+    raw = all_text(aff_elem)
+    if label is not None and label.text and raw.startswith(label.text):
+        raw = raw[len(label.text) :].strip()
+    return raw
+
+
+_NOT_AFFILIATION = re.compile(
+    r"^(these authors |contributed equally|lead contact|present address)",
+    re.IGNORECASE,
+)
+
+
 def _parse_affiliations(root: etree._Element) -> dict[str, str]:
-    """Build a map of aff id -> affiliation text."""
+    """Build a map of aff id -> affiliation text.
+
+    Handles ``<aff>`` as direct children of ``<article-meta>`` *and*
+    inside ``<contrib-group>`` (eLife style).  Filters out entries
+    that are footnotes rather than affiliations (e.g. "These authors
+    contributed equally", "Lead contact").
+    """
     aff_map: dict[str, str] = {}
-    for aff_elem in root.findall(".//article-meta/aff"):
-        aff_id = aff_elem.get("id", "")
-        aff_text = all_text(aff_elem)
-        if aff_id and aff_text:
-            aff_map[aff_id] = aff_text
+    for path in (
+        ".//article-meta/aff",
+        ".//article-meta/contrib-group/aff",
+    ):
+        for aff_elem in root.findall(path):
+            aff_id = aff_elem.get("id", "")
+            if aff_id and aff_id not in aff_map:
+                aff_text = _aff_text(aff_elem)
+                if aff_text and not _NOT_AFFILIATION.match(aff_text):
+                    aff_map[aff_id] = aff_text
     return aff_map
 
 
-def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author]:
+def _parse_con_footnotes(root: etree._Element) -> dict[str, str]:
+    """Build a map of fn id -> contribution text for fn-type='con' footnotes.
+
+    eLife stores CRediT roles as ``<fn fn-type="con">`` referenced via
+    ``<xref ref-type="fn" rid="con1">`` from each contributor.
+    """
+    con_map: dict[str, str] = {}
+    for fn in root.findall(".//fn[@fn-type='con']"):
+        fn_id = fn.get("id", "")
+        if fn_id:
+            fn_text = all_text(fn)
+            if fn_text:
+                con_map[fn_id] = fn_text
+    return con_map
+
+
+def _parse_authors(
+    root: etree._Element,
+    aff_map: dict[str, str],
+    con_map: dict[str, str] | None = None,
+) -> list[Author]:
     """Extract authors from contrib-group, resolving affiliations via xref.
 
     Handles both personal names (<name>) and group/collaborative
     authors (<collab>).
     """
+    if con_map is None:
+        con_map = {}
     authors = []
     for contrib in root.findall(".//article-meta/contrib-group/contrib[@contrib-type='author']"):
         author = Author()
@@ -922,6 +1199,8 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
                 author.surname = all_text(collab_elem)
 
         email_elem = contrib.find("email")
+        if email_elem is None:
+            email_elem = contrib.find(".//address/email")
         if email_elem is not None:
             author.email = text(email_elem)
 
@@ -936,13 +1215,31 @@ def _parse_authors(root: etree._Element, aff_map: dict[str, str]) -> list[Author
             if rid in aff_map:
                 author.affiliations.append(aff_map[rid])
 
+        # Inline affiliations within the contrib element
+        _collect_inline_aff(contrib, author)
+
         # CRediT roles from <role> elements
         for role_el in contrib.findall("role"):
             role_text = all_text(role_el)
             if role_text:
                 author.roles.append(role_text)
 
+        # CRediT roles from fn-type="con" xrefs (eLife style)
+        if not author.roles:
+            for xref in contrib.findall("xref[@ref-type='fn']"):
+                rid = xref.get("rid", "")
+                if rid and rid in con_map:
+                    author.roles.append(con_map[rid])
+
         authors.append(author)
+
+    # If no author has affiliations but aff_map has entries,
+    # assign all affiliations to all authors (shared affiliation).
+    if aff_map and authors and not any(a.affiliations for a in authors):
+        shared = list(aff_map.values())
+        for author in authors:
+            author.affiliations = list(shared)
+
     return authors
 
 
@@ -1355,11 +1652,13 @@ def _collect_from_p(p_elem: etree._Element, section: Section) -> None:
     def _collect_inline(child: etree._Element) -> None:
         tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
         if tag == "xref":
+            # Preserve inline formatting (sup/sub) inside citations
             ref_text = all_text(child)
+            display_text = _inline_text(child) if child.find("sup") is not None or child.find("sub") is not None else ref_text
             rid = child.get("rid", "")
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
-                parts.append(ref_text)
+                parts.append(display_text)
         elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
             href = child.get("{http://www.w3.org/1999/xlink}href", "")
@@ -1502,10 +1801,11 @@ def _parse_paragraph(
 
         if tag == "xref":
             ref_text = all_text(child)
+            display_text = _inline_text(child) if child.find("sup") is not None or child.find("sub") is not None else ref_text
             rid = child.get("rid", "")
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
-                parts.append(ref_text)
+                parts.append(display_text)
         elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
             href = child.get("{http://www.w3.org/1999/xlink}href", "")
@@ -1977,12 +2277,13 @@ def _parse_table_row(
                 colspan = 1
             cell_align = child.get("align", "")
             # Preserve paragraph boundaries in multi-<p> cells.
+            # Use _inline_text to retain formatting (italic, sup, sub).
             p_children = child.findall("p")
             if p_children:
                 parts = [_inline_text(p).strip() for p in p_children]
                 cell_text = "\n".join(t for t in parts if t)
             else:
-                cell_text = all_text(child)
+                cell_text = _inline_text(child).strip()
             cell = TableCell(
                 text=cell_text,
                 is_header=(tag == "th" or is_header),
@@ -2433,6 +2734,83 @@ def _extract_fn_notes(fn: etree._Element, section: Section) -> None:
             section.notes.append(fn_text)
 
 
+_FN_FIELD_ROUTES = {
+    "author contributions": "author_contributions",
+    "funding": "funding_statement",
+    "data availability": "data_availability",
+    "data and resource availability": "data_availability",
+}
+
+
+def _route_fn_to_fields(
+    fn: etree._Element,
+    fn_type: str,
+    doc: Document | None,
+) -> bool:
+    """Route an ``<fn>`` to a dedicated Document field if recognisable.
+
+    Detects footnotes by ``fn-type`` attribute (e.g. ``"con"``,
+    ``"financial-disclosure"``) or by bold title text in the first
+    ``<p>`` (e.g. ``"Author contributions"``, ``"Funding"``).
+
+    Returns True if the footnote was consumed (caller should skip it).
+    """
+    if doc is None:
+        return False
+
+    # Route by fn-type
+    if fn_type == "con":
+        return False  # handled via con_map → Author.roles
+    if fn_type == "financial-disclosure":
+        # Extract text from <p> children (skip title <p>)
+        texts = []
+        for p in fn.findall("p"):
+            t = all_text(p).strip()
+            bold = p.find("bold")
+            if bold is not None and t.lower().startswith(bold.text.lower()):
+                continue  # skip title paragraph
+            if t:
+                texts.append(t)
+        if texts and not doc.funding_statement:
+            doc.funding_statement = "\n\n".join(texts)
+        return True
+
+    # Route by bold title in first <p>
+    paras = fn.findall("p")
+    if not paras:
+        return False
+    first_p = paras[0]
+    bold = first_p.find("bold")
+    if bold is None or not bold.text:
+        return False
+    title_lower = bold.text.strip().lower()
+
+    field = _FN_FIELD_ROUTES.get(title_lower)
+    if field is None:
+        return False
+
+    # Collect text from subsequent <p> elements (skip the title <p>)
+    texts = []
+    for p in paras[1:]:
+        t = _inline_text(p).strip()
+        if t:
+            texts.append(t)
+    content = "\n\n".join(texts)
+
+    if field == "author_contributions":
+        # Store as author_notes for now (will be in Author Notes section)
+        if content and content not in doc.author_notes:
+            doc.author_notes.append(content)
+    elif field == "funding_statement":
+        if content and not doc.funding_statement:
+            doc.funding_statement = content
+    elif field == "data_availability":
+        if content and not doc.data_availability:
+            doc.data_availability = content
+
+    return True
+
+
 def _extract_fn_paragraphs(fn: etree._Element, section: Section) -> None:
     """Extract paragraphs from a ``<fn>`` element.
 
@@ -2493,31 +2871,19 @@ def _parse_back_sections(
             title_elem = child.find("title")
             if title_elem is not None:
                 section.heading = all_text(title_elem)
-            con_section = None
             for fn in child.findall("fn"):
                 fn_type = fn.get("fn-type", "")
                 # Skip COI footnotes already captured in doc.competing_interests
                 if fn_type in _COI_FN_TYPES:
                     continue
-                # Author contributions get their own headed section to
-                # survive markdown roundtrip without being absorbed by
-                # adjacent sections (e.g. Funding).
-                if fn_type == "con":
-                    if con_section is None:
-                        con_section = Section(
-                            level=1,
-                            heading="Author Contributions",
-                        )
-                    _extract_fn_paragraphs(fn, con_section)
+                # Detect bold-titled subsections and route to dedicated fields
+                routed = _route_fn_to_fields(fn, fn_type, doc)
+                if routed:
                     continue
-                # Back-matter fn-group notes are standalone statements
-                # (not inline footnotes), so store as paragraphs for
-                # reliable roundtrip through Markdown.
+                # Remaining notes go into the generic back-matter section
                 _extract_fn_paragraphs(fn, section)
-            if section.paragraphs or section.heading:
+            if section.paragraphs:
                 sections.append(section)
-            if con_section and con_section.paragraphs:
-                sections.append(con_section)
         elif tag == "notes":
             section = Section(level=1)
             title_elem = child.find("title")

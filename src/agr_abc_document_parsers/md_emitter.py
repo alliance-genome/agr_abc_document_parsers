@@ -30,7 +30,6 @@ def emit_markdown(doc: Document) -> str:
     _emit_categories(doc, lines)
     _emit_authors(doc, lines)
     _emit_abstract(doc, lines)
-    _emit_secondary_abstracts(doc, lines)
     _emit_keywords(doc, lines)
     footnote_counter = [0]  # mutable counter shared across sections
     _emit_sections(doc.sections, lines, base_level=2, footnote_counter=footnote_counter)
@@ -44,6 +43,7 @@ def emit_markdown(doc: Document) -> str:
     _emit_back_matter(doc, lines, footnote_counter=footnote_counter)
     _emit_references(doc, lines)
     _emit_author_roles(doc, lines)
+    _emit_secondary_abstracts(doc, lines)
     _emit_sub_articles(doc, lines)
 
     return "\n".join(lines).rstrip("\n") + "\n"
@@ -82,8 +82,16 @@ def _emit_metadata(doc: Document, lines: list[str]) -> None:
         meta_parts.append(f"**Citation:** {', '.join(cite_parts)}")
     if doc.pub_date:
         meta_parts.append(f"**Published:** {doc.pub_date}")
+    if doc.received_date:
+        meta_parts.append(f"**Received:** {doc.received_date}")
+    if doc.accepted_date:
+        meta_parts.append(f"**Accepted:** {doc.accepted_date}")
     if doc.license:
         meta_parts.append(f"**License:** {doc.license}")
+    if doc.license_url:
+        meta_parts.append(f"**License URL:** {doc.license_url}")
+    if doc.copyright:
+        meta_parts.append(f"**Copyright:** {doc.copyright}")
     if not meta_parts:
         return
     for part in meta_parts:
@@ -95,25 +103,32 @@ def _emit_authors(doc: Document, lines: list[str]) -> None:
     if not doc.authors:
         return
 
-    # Comma-separated author names
+    # Build deduplicated affiliation list and index
+    all_affils: list[str] = []
+    aff_index: dict[str, int] = {}
+    for author in doc.authors:
+        for aff in author.affiliations:
+            if aff and aff not in aff_index:
+                aff_index[aff] = len(all_affils) + 1
+                all_affils.append(aff)
+
+    # Author names with superscript affiliation numbers
     author_parts = []
     for author in doc.authors:
         name = f"{author.given_name} {author.surname}".strip()
-        if name:
-            author_parts.append(name)
+        if not name:
+            continue
+        if all_affils and author.affiliations:
+            nums = ",".join(str(aff_index[a]) for a in author.affiliations if a in aff_index)
+            if nums:
+                name = f"{name}<sup>{nums}</sup>"
+        author_parts.append(name)
 
     if author_parts:
         lines.append(", ".join(author_parts))
         lines.append("")
 
-    # Affiliations (deduplicated, numbered)
-    all_affils: list[str] = []
-    seen: set[str] = set()
-    for author in doc.authors:
-        for aff in author.affiliations:
-            if aff and aff not in seen:
-                seen.add(aff)
-                all_affils.append(aff)
+    # Numbered affiliations
     if all_affils:
         for i, aff in enumerate(all_affils, 1):
             lines.append(f"{i}. {aff}")
@@ -127,6 +142,16 @@ def _emit_authors(doc: Document, lines: list[str]) -> None:
             email_parts.append(f"{name} ({author.email})")
     if email_parts:
         lines.append(f"**Correspondence:** {', '.join(email_parts)}")
+        lines.append("")
+
+    # ORCIDs
+    orcid_parts = []
+    for author in doc.authors:
+        if author.orcid:
+            name = f"{author.given_name} {author.surname}".strip()
+            orcid_parts.append(f"{name} ({author.orcid})")
+    if orcid_parts:
+        lines.append(f"**ORCIDs:** {', '.join(orcid_parts)}")
         lines.append("")
 
 
@@ -565,7 +590,7 @@ def _emit_secondary_abstracts(doc: Document, lines: list[str]) -> None:
 
 
 def _emit_author_roles(doc: Document, lines: list[str]) -> None:
-    """Emit CRediT author roles as footnotes after references."""
+    """Emit CRediT author roles as a headed section after references."""
     entries: list[str] = []
     for author in doc.authors:
         if author.roles:
@@ -573,9 +598,11 @@ def _emit_author_roles(doc: Document, lines: list[str]) -> None:
             entries.append(f"{name}: {', '.join(author.roles)}")
     if not entries:
         return
-    for i, entry in enumerate(entries, 1):
-        lines.append(f"[^{i}]: {entry}")
+    lines.append("## Author Contributions")
     lines.append("")
+    for entry in entries:
+        lines.append(entry)
+        lines.append("")
 
 
 def _emit_sub_articles(doc: Document, lines: list[str]) -> None:
