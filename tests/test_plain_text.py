@@ -1,9 +1,11 @@
 """Tests for plain text extraction (plain_text.py)."""
 
 from agr_abc_document_parsers.models import (
+    Author,
     Document,
     Figure,
     Formula,
+    FundingEntry,
     ListBlock,
     Paragraph,
     Reference,
@@ -580,3 +582,230 @@ class TestPlainTextNewFeatures:
         assert "Corresponding author: a@b.edu" in result
         assert "No competing interests declared." in result
         assert "Data deposited at GEO." in result
+
+
+# ---------------------------------------------------------------------------
+# Granular include/exclude flags
+# ---------------------------------------------------------------------------
+
+
+def _rich_doc() -> Document:
+    """Build a Document with all content sections populated."""
+    return Document(
+        title="Test Paper",
+        authors=[
+            Author(given_name="Alice", surname="Smith", email="alice@example.com"),
+            Author(given_name="Bob", surname="Jones"),
+        ],
+        abstract=[Paragraph(text="Abstract paragraph.")],
+        secondary_abstracts=[
+            SecondaryAbstract(label="Author Summary", paragraphs=[Paragraph(text="Summary.")])
+        ],
+        keywords=["gene expression", "RNA-seq"],
+        sections=[
+            Section(
+                heading="Introduction",
+                paragraphs=[Paragraph(text="Body paragraph.")],
+            )
+        ],
+        acknowledgments="Thanks to funding agency.",
+        funding=[FundingEntry(funder="NIH", award_ids=["R01-123"])],
+        funding_statement="Supported by NIH.",
+        author_notes=["Corresponding author: alice@example.com"],
+        competing_interests="No competing interests.",
+        data_availability="Data at GEO.",
+        back_matter=[Section(heading="Appendix", paragraphs=[Paragraph(text="Appendix text.")])],
+        references=[
+            Reference(
+                index=1,
+                authors=["Smith A", "Jones B"],
+                year="2024",
+                title="A great paper",
+                journal="Nature",
+                volume="600",
+                pages="1-10",
+                doi="10.1234/example",
+            ),
+        ],
+    )
+
+
+class TestIncludeExcludeFlags:
+    """Test each granular include/exclude flag independently."""
+
+    def test_include_authors(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_authors=True)
+        assert "Alice Smith, Bob Jones" in result
+
+    def test_exclude_authors_by_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Alice Smith, Bob Jones" not in result
+
+    def test_include_correspondence(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_correspondence=True)
+        assert "Correspondence: Alice Smith (alice@example.com)" in result
+        # Bob has no email, should not appear in correspondence
+        assert "Bob Jones" not in result.split("Correspondence:")[1].split("\n\n")[0]
+
+    def test_exclude_correspondence_by_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Correspondence:" not in result
+
+    def test_include_metadata(self):
+        doc = _rich_doc()
+        doc.journal = "Nature"
+        doc.doi = "10.1234/test"
+        result = extract_plain_text(doc, include_metadata=True)
+        assert "Journal: Nature" in result
+        assert "DOI: 10.1234/test" in result
+
+    def test_exclude_metadata_by_default(self):
+        doc = _rich_doc()
+        doc.journal = "Nature"
+        result = extract_plain_text(doc)
+        assert "Journal:" not in result
+
+    def test_include_abstract_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Abstract paragraph." in result
+        assert "Summary." in result
+
+    def test_exclude_abstract(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_abstract=False)
+        assert "Abstract paragraph." not in result
+        assert "Author Summary" not in result
+        assert "Summary." not in result
+
+    def test_include_keywords(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_keywords=True)
+        assert "Keywords: gene expression, RNA-seq" in result
+
+    def test_exclude_keywords_by_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Keywords:" not in result
+
+    def test_include_body_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Introduction" in result
+        assert "Body paragraph." in result
+
+    def test_exclude_body(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_body=False)
+        assert "Body paragraph." not in result
+
+    def test_include_acknowledgments_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Thanks to funding agency." in result
+
+    def test_exclude_acknowledgments(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_acknowledgments=False)
+        assert "Thanks to funding agency." not in result
+
+    def test_include_funding_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "NIH: R01-123" in result
+
+    def test_exclude_funding(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_funding=False)
+        assert "NIH: R01-123" not in result
+        assert "Supported by NIH." not in result
+
+    def test_include_author_notes_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Corresponding author: alice@example.com" in result
+
+    def test_exclude_author_notes(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_author_notes=False)
+        assert "Author Notes" not in result
+
+    def test_include_competing_interests_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "No competing interests." in result
+
+    def test_exclude_competing_interests(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_competing_interests=False)
+        assert "No competing interests." not in result
+
+    def test_include_data_availability_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Data at GEO." in result
+
+    def test_exclude_data_availability(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_data_availability=False)
+        assert "Data at GEO." not in result
+
+    def test_include_back_matter_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "Appendix text." in result
+
+    def test_exclude_back_matter(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_back_matter=False)
+        assert "Appendix text." not in result
+
+    def test_include_references(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc, include_references=True)
+        assert "References" in result
+        assert "A great paper" in result
+        assert "doi:10.1234/example" in result
+
+    def test_exclude_references_by_default(self):
+        doc = _rich_doc()
+        result = extract_plain_text(doc)
+        assert "A great paper" not in result
+
+    def test_exclude_everything_except_title(self):
+        doc = _rich_doc()
+        result = extract_plain_text(
+            doc,
+            include_abstract=False,
+            include_body=False,
+            include_acknowledgments=False,
+            include_funding=False,
+            include_author_notes=False,
+            include_competing_interests=False,
+            include_data_availability=False,
+            include_back_matter=False,
+            include_supplements=False,
+        )
+        assert result == "Test Paper"
+
+    def test_include_everything(self):
+        doc = _rich_doc()
+        doc.journal = "Nature"
+        result = extract_plain_text(
+            doc,
+            include_authors=True,
+            include_correspondence=True,
+            include_metadata=True,
+            include_keywords=True,
+            include_references=True,
+        )
+        assert "Alice Smith, Bob Jones" in result
+        assert "alice@example.com" in result
+        assert "Journal: Nature" in result
+        assert "Keywords:" in result
+        assert "A great paper" in result
+        assert "Body paragraph." in result

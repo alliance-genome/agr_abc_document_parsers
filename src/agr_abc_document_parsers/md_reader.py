@@ -37,6 +37,8 @@ _TABLE_LABEL_RE = re.compile(
 )
 _FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+)$")
 _CATEGORIES_RE = re.compile(r"^\*\*Categories:\*\*\s*(.+)$")
+_CORRESPONDENCE_RE = re.compile(r"^\*\*Correspondence:\*\*\s*(.+)$")
+_CORRESP_ENTRY_RE = re.compile(r"(.+?)\s*\(([^)]+@[^)]+)\)")
 _ROLE_FOOTNOTE_RE = re.compile(r"^\[\^(\d+)\]:\s+(.+?):\s+(.+)$")
 _HR_RE = re.compile(r"^---\s*$")
 _FIG_DOI_RE = re.compile(r"^<!--\s*doi:\s*(.+?)\s*-->$")
@@ -130,6 +132,12 @@ def read_markdown(text: str) -> Document:
         pos += 1
     pos = _skip_blank(lines, pos, n)
 
+    # --- Correspondence line (**Correspondence:** Name (email), ...) ---
+    if pos < n and _CORRESPONDENCE_RE.match(lines[pos]):
+        _parse_correspondence_line(lines[pos], doc.authors)
+        pos += 1
+        pos = _skip_blank(lines, pos, n)
+
     # --- Keywords before first H2 (if no abstract) ---
     if pos < n and _KEYWORDS_RE.match(lines[pos]):
         doc.keywords = _parse_keywords(lines[pos])
@@ -149,6 +157,7 @@ def read_markdown(text: str) -> Document:
             or section.tables
             or section.lists
             or section.notes
+            or section.subsections
         ):
             doc.sections.append(section)
 
@@ -519,6 +528,24 @@ def _parse_author_line(line: str) -> list[Author]:
         else:
             authors.append(Author(surname=parts[0]))
     return authors
+
+
+def _parse_correspondence_line(line: str, authors: list[Author]) -> None:
+    """Parse **Correspondence:** line and assign emails to matching authors."""
+    m = _CORRESPONDENCE_RE.match(line)
+    if not m:
+        return
+    # Build lookup from full name to author
+    name_map: dict[str, Author] = {}
+    for author in authors:
+        full = f"{author.given_name} {author.surname}".strip()
+        if full:
+            name_map[full] = author
+    for entry_m in _CORRESP_ENTRY_RE.finditer(m.group(1)):
+        name = entry_m.group(1).strip().lstrip(",").strip()
+        email = entry_m.group(2).strip()
+        if name in name_map:
+            name_map[name].email = email
 
 
 def _parse_keywords(line: str) -> list[str]:

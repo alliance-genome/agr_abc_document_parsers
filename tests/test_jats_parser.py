@@ -258,6 +258,24 @@ class TestJatsParser:
         assert doc.authors[1].surname == "Jones"
         assert "Stanford" in doc.authors[1].affiliations[0]
 
+    def test_author_email_in_markdown(self):
+        """Author emails are preserved in emitted Markdown."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+
+        doc = parse_jats(FULL_JATS)
+        md = emit_markdown(doc)
+        assert "**Correspondence:** Alice M Smith (alice@example.com)" in md
+
+    def test_author_email_roundtrip(self):
+        """Author emails survive JATS → MD → Document round-trip."""
+        from agr_abc_document_parsers.md_emitter import emit_markdown
+        from agr_abc_document_parsers.md_reader import read_markdown
+
+        doc = parse_jats(FULL_JATS)
+        md = emit_markdown(doc)
+        doc2 = read_markdown(md)
+        assert doc2.authors[0].email == "alice@example.com"
+
     def test_parse_abstract(self):
         """Abstract from //article-meta/abstract."""
         doc = parse_jats(FULL_JATS)

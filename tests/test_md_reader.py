@@ -53,6 +53,31 @@ class TestReadMarkdownBasic:
         assert doc.authors[1].given_name == "Bob"
         assert doc.authors[1].surname == "Jones"
 
+    def test_correspondence_line(self):
+        md = (
+            "# Title\n\n"
+            "Alice Smith, Bob Jones\n\n"
+            "1. MIT\n\n"
+            "**Correspondence:** Alice Smith (alice@example.com)\n\n"
+            "## Abstract\n\nText.\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.authors) == 2
+        assert doc.authors[0].email == "alice@example.com"
+        assert doc.authors[1].email == ""
+
+    def test_correspondence_multiple_emails(self):
+        md = (
+            "# Title\n\n"
+            "Alice Smith, Bob Jones, Carol Lee\n\n"
+            "**Correspondence:** Alice Smith (a@ex.com), Carol Lee (c@ex.org)\n\n"
+            "## Abstract\n\nText.\n"
+        )
+        doc = read_markdown(md)
+        assert doc.authors[0].email == "a@ex.com"
+        assert doc.authors[1].email == ""
+        assert doc.authors[2].email == "c@ex.org"
+
     def test_abstract(self):
         md = "# Title\n\n## Abstract\n\nFirst paragraph.\n\nSecond paragraph.\n"
         doc = read_markdown(md)
@@ -357,6 +382,18 @@ class TestRoundTrip:
                 authors=[
                     Author(given_name="Alice", surname="Smith"),
                     Author(given_name="Bob", surname="Jones"),
+                ],
+            )
+        )
+
+    def test_round_trip_author_emails(self):
+        self._assert_round_trip(
+            _make_doc(
+                title="Paper Title",
+                authors=[
+                    Author(given_name="Alice", surname="Smith", email="alice@example.com"),
+                    Author(given_name="Bob", surname="Jones"),
+                    Author(given_name="Carol", surname="Lee", email="carol@example.org"),
                 ],
             )
         )

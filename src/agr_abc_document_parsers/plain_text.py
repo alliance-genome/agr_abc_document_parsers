@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import re
 
-from agr_abc_document_parsers.models import Document, Figure, Section, Table
+from agr_abc_document_parsers.models import (
+    Document,
+    Figure,
+    Reference,
+    Section,
+    Table,
+)
 
 # ---------------------------------------------------------------------------
 # Inline Markdown stripping
@@ -86,21 +92,53 @@ def strip_markdown_formatting(text: str) -> str:
 
 def extract_plain_text(
     doc: Document,
-    include_supplements: bool = True,
+    include_authors: bool = False,
+    include_correspondence: bool = False,
     include_metadata: bool = False,
+    include_abstract: bool = True,
+    include_keywords: bool = False,
+    include_body: bool = True,
+    include_acknowledgments: bool = True,
+    include_funding: bool = True,
+    include_author_notes: bool = True,
+    include_competing_interests: bool = True,
+    include_data_availability: bool = True,
+    include_back_matter: bool = True,
+    include_references: bool = False,
+    include_supplements: bool = True,
     include_sub_articles: bool = False,
 ) -> str:
     """Extract plain text from a Document, stripping Markdown formatting.
 
-    Returns title + abstract + secondary abstracts + body sections +
-    acknowledgments + supplement text (excluding References).
-    Supplements are included by default; sub-articles excluded by default.
+    Each content section can be independently included or excluded.
+    Defaults preserve backward-compatible behaviour: title + abstract +
+    secondary abstracts + body + acknowledgments + funding + author
+    notes + competing interests + data availability + back matter +
+    supplements.
 
     Args:
         doc: A populated Document model.
-        include_supplements: Whether to include supplement text.
+        include_authors: Whether to include author names.
+        include_correspondence: Whether to include corresponding
+            author emails (e.g. ``Correspondence: Name (email)``).
         include_metadata: Whether to include article metadata
             (journal, DOI, PMID, etc.).
+        include_abstract: Whether to include abstract and secondary
+            abstracts.
+        include_keywords: Whether to include keyword list.
+        include_body: Whether to include body sections (paragraphs,
+            figures, tables, formulas, lists).
+        include_acknowledgments: Whether to include acknowledgments.
+        include_funding: Whether to include funding information.
+        include_author_notes: Whether to include author notes
+            (correspondence notes from ``<author-notes>``).
+        include_competing_interests: Whether to include competing
+            interest statements.
+        include_data_availability: Whether to include data
+            availability statements.
+        include_back_matter: Whether to include back-matter sections.
+        include_references: Whether to include the reference list.
+        include_supplements: Whether to include supplement text.
         include_sub_articles: Whether to include sub-article text
             (e.g., decision letters, author responses).
 
@@ -127,28 +165,51 @@ def extract_plain_text(
         if meta_parts:
             parts.append("; ".join(meta_parts))
 
-    for para in doc.abstract:
-        parts.append(strip_markdown_formatting(para.text))
+    if include_authors and doc.authors:
+        names = []
+        for author in doc.authors:
+            name = f"{author.given_name} {author.surname}".strip()
+            if name:
+                names.append(name)
+        if names:
+            parts.append(", ".join(names))
 
-    for sa in doc.secondary_abstracts:
-        if sa.label:
-            parts.append(strip_markdown_formatting(sa.label))
-        for para in sa.paragraphs:
+    if include_correspondence:
+        email_parts = []
+        for author in doc.authors:
+            if author.email:
+                name = f"{author.given_name} {author.surname}".strip()
+                email_parts.append(f"{name} ({author.email})")
+        if email_parts:
+            parts.append("Correspondence: " + ", ".join(email_parts))
+
+    if include_abstract:
+        for para in doc.abstract:
             parts.append(strip_markdown_formatting(para.text))
 
-    _collect_sections_text(doc.sections, parts)
+        for sa in doc.secondary_abstracts:
+            if sa.label:
+                parts.append(strip_markdown_formatting(sa.label))
+            for para in sa.paragraphs:
+                parts.append(strip_markdown_formatting(para.text))
 
-    for fig in doc.figures:
-        _collect_figure_text(fig, parts)
+    if include_keywords and doc.keywords:
+        parts.append("Keywords: " + ", ".join(doc.keywords))
 
-    for table in doc.tables:
-        _collect_table_text(table, parts)
+    if include_body:
+        _collect_sections_text(doc.sections, parts)
 
-    if doc.acknowledgments:
+        for fig in doc.figures:
+            _collect_figure_text(fig, parts)
+
+        for table in doc.tables:
+            _collect_table_text(table, parts)
+
+    if include_acknowledgments and doc.acknowledgments:
         parts.append("Acknowledgments")
         parts.append(strip_markdown_formatting(doc.acknowledgments))
 
-    if doc.funding_statement or doc.funding:
+    if include_funding and (doc.funding_statement or doc.funding):
         parts.append("Funding")
         if doc.funding:
             for entry in doc.funding:
@@ -159,18 +220,22 @@ def extract_plain_text(
                     parts.append(entry.funder)
         if doc.funding_statement:
             parts.append(strip_markdown_formatting(doc.funding_statement))
-    if doc.author_notes:
+
+    if include_author_notes and doc.author_notes:
         parts.append("Author Notes")
         for note in doc.author_notes:
             parts.append(strip_markdown_formatting(note))
-    if doc.competing_interests:
+
+    if include_competing_interests and doc.competing_interests:
         parts.append("Competing Interests")
         parts.append(strip_markdown_formatting(doc.competing_interests))
-    if doc.data_availability:
+
+    if include_data_availability and doc.data_availability:
         parts.append("Data Availability Statement")
         parts.append(strip_markdown_formatting(doc.data_availability))
 
-    _collect_sections_text(doc.back_matter, parts)
+    if include_back_matter:
+        _collect_sections_text(doc.back_matter, parts)
 
     # Reference annotation notes (note-only refs without citation data).
     for ref in doc.references:
@@ -178,6 +243,9 @@ def extract_plain_text(
             note_text = ref.comment or ref.title
             if note_text:
                 parts.append(strip_markdown_formatting(note_text))
+
+    if include_references:
+        _collect_references_text(doc.references, parts)
 
     if include_supplements:
         for supp in doc.supplements:
@@ -332,6 +400,53 @@ def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
             parts.append(strip_markdown_formatting(note))
 
         _collect_sections_text(section.subsections, parts)
+
+
+def _collect_references_text(
+    references: list[Reference],
+    parts: list[str],
+) -> None:
+    """Collect plain text from the reference list."""
+    if not references:
+        return
+    parts.append("References")
+    for ref in references:
+        ref_parts: list[str] = []
+        if ref.authors:
+            ref_parts.append(", ".join(ref.authors))
+        if ref.year:
+            ref_parts.append(f"({ref.year})")
+        if ref.title:
+            ref_parts.append(f"{ref.title}.")
+        if ref.chapter_title:
+            ref_parts.append(f"In: {ref.chapter_title}.")
+        if ref.editors:
+            ref_parts.append(f"Edited by {', '.join(ref.editors)}.")
+        if ref.journal:
+            journal_part = ref.journal
+            if ref.volume:
+                journal_part += f", {ref.volume}"
+                if ref.issue:
+                    journal_part += f"({ref.issue})"
+            if ref.pages:
+                journal_part += f", {ref.pages}"
+            journal_part += "."
+            ref_parts.append(journal_part)
+        if ref.publisher:
+            pub_str = ref.publisher
+            if ref.publisher_loc:
+                pub_str = f"{ref.publisher_loc}: {pub_str}"
+            ref_parts.append(f"{pub_str}.")
+        if ref.doi:
+            ref_parts.append(f"doi:{ref.doi}")
+        if ref.pmid:
+            ref_parts.append(f"PMID:{ref.pmid}")
+        if ref.comment and not ref_parts:
+            ref_parts.append(ref.comment)
+        elif ref.comment:
+            ref_parts.append(ref.comment)
+        if ref_parts:
+            parts.append(f"{ref.index}. " + " ".join(ref_parts))
 
 
 def _split_sentences(text: str) -> list[str]:

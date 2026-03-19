@@ -119,6 +119,16 @@ def _emit_authors(doc: Document, lines: list[str]) -> None:
             lines.append(f"{i}. {aff}")
         lines.append("")
 
+    # Corresponding author emails
+    email_parts = []
+    for author in doc.authors:
+        if author.email:
+            name = f"{author.given_name} {author.surname}".strip()
+            email_parts.append(f"{name} ({author.email})")
+    if email_parts:
+        lines.append(f"**Correspondence:** {', '.join(email_parts)}")
+        lines.append("")
+
 
 def _emit_abstract(doc: Document, lines: list[str]) -> None:
     if not doc.abstract:

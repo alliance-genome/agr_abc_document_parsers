@@ -43,6 +43,32 @@ class TestMdEmitter:
         # No 'Authors:' prefix (consensus pipeline format)
         assert "Authors:" not in md
 
+    def test_emit_author_emails(self):
+        """Corresponding author emails emitted on Correspondence line."""
+        doc = _make_doc(
+            authors=[
+                Author(given_name="Alice", surname="Smith", email="alice@example.com"),
+                Author(given_name="Bob", surname="Jones"),
+                Author(given_name="Carol", surname="Lee", email="carol@example.org"),
+            ]
+        )
+        md = emit_markdown(doc)
+        assert (
+            "**Correspondence:** Alice Smith (alice@example.com), Carol Lee (carol@example.org)"
+            in md
+        )
+
+    def test_emit_no_author_emails_when_none(self):
+        """No Correspondence line when no author has an email."""
+        doc = _make_doc(
+            authors=[
+                Author(given_name="Alice", surname="Smith"),
+                Author(given_name="Bob", surname="Jones"),
+            ]
+        )
+        md = emit_markdown(doc)
+        assert "Correspondence" not in md
+
     def test_emit_abstract(self):
         """Abstract section: '## Abstract' + paragraphs."""
         doc = _make_doc(

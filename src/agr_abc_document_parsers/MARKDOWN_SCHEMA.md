@@ -13,6 +13,10 @@ A valid document follows this top-level order:
                                  ← blank line
 Author A, Author B               ← plain comma-separated names (optional)
                                  ← blank line
+1. Affiliation X                 ← numbered affiliations (optional)
+                                 ← blank line
+**Correspondence:** A (a@ex.com) ← author emails (optional)
+                                 ← blank line
 ## Abstract                      ← abstract section (optional but recommended)
                                  ← blank line
 Paragraph text ...
@@ -148,8 +152,10 @@ Numbered list in the final `## References` section:
 ## Notes
 
 - Section numbers (e.g., "1.", "2.1") are **omitted** from headings.
-- Author affiliations and ORCIDs are stored in the data model but not
-  emitted in Markdown.
+- Author affiliations are emitted as a numbered list after the author line.
+- Author emails are emitted on a `**Correspondence:**` line after
+  affiliations, formatted as `Name (email), Name (email)`.
+- ORCIDs are stored in the data model but not emitted in Markdown.
 - Back-matter sections (funding, data availability, author contributions,
   etc.) are emitted as H2 sections between Acknowledgments and References.
 - Inline formatting (`*italic*`, `**bold**`, `<sup>`, `<sub>`) is
