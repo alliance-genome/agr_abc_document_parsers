@@ -2773,7 +2773,7 @@ def _route_fn_to_fields(
         for p in fn.findall("p"):
             t = all_text(p).strip()
             bold = p.find("bold")
-            if bold is not None and t.lower().startswith(bold.text.lower()):
+            if bold is not None and bold.text and t.lower().startswith(bold.text.lower()):
                 continue  # skip title paragraph
             if t:
                 texts.append(t)

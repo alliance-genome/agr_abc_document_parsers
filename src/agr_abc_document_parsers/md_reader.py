@@ -241,6 +241,25 @@ def read_markdown(text: str) -> Document:
             doc.data_availability = _parse_single_text_block(content_lines)
         elif heading == "Author Contributions":
             _parse_author_contributions(content_lines, doc)
+            # Also parse as a section so that figures and
+            # non-role paragraphs survive the round-trip.
+            sec = _parse_section_lines(heading, content_lines, 2)
+            sec.is_boxed = is_boxed
+            # Remove paragraphs that were already parsed as roles
+            # to avoid duplicate emission.
+            role_names = {
+                f"{a.given_name} {a.surname}".strip()
+                for a in doc.authors if a.roles
+            }
+            if role_names:
+                sec.paragraphs = [
+                    p for p in sec.paragraphs
+                    if not _ROLE_LINE_RE.match(p.text.strip())
+                    or _ROLE_LINE_RE.match(p.text.strip()).group(1).strip()
+                    not in role_names
+                ]
+            if sec.paragraphs or sec.figures or sec.tables or sec.lists:
+                doc.sections.append(sec)
         elif heading == "References":
             refs = _parse_references_lines(content_lines)
             if refs:
@@ -1048,6 +1067,7 @@ def _parse_section_lines(
     n = len(content_lines)
     i = 0
     last_table: Table | None = None
+    last_fig: Figure | None = None
     capture_table_fns = False
     table_fn_collected = 0
     pending_fig_doi = ""
@@ -1089,6 +1109,7 @@ def _parse_section_lines(
             box_section.is_boxed = True
             section.subsections.append(box_section)
             last_table = None
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1119,6 +1140,7 @@ def _parse_section_lines(
             )
             section.subsections.append(sub_section)
             last_table = None
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1132,6 +1154,7 @@ def _parse_section_lines(
             table = _parse_gfm_table(table_lines)
             section.tables.append(table)
             last_table = table
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1156,6 +1179,7 @@ def _parse_section_lines(
                     section.tables.append(t)
                     last_table = t
                     capture_table_fns = False
+                last_fig = None
                 table_fn_collected = 0
                 i += 1
                 continue
@@ -1169,6 +1193,7 @@ def _parse_section_lines(
                 section.figures.append(fig)
                 pending_fig_doi = ""
                 last_table = None
+                last_fig = fig
                 capture_table_fns = False
                 table_fn_collected = 0
                 i += 1
@@ -1183,6 +1208,7 @@ def _parse_section_lines(
             section.figures.append(fig)
             pending_fig_doi = ""
             last_table = None
+            last_fig = fig
             capture_table_fns = False
             table_fn_collected = 0
             i += 1
@@ -1193,6 +1219,7 @@ def _parse_section_lines(
         if m_fn:
             section.notes.append(m_fn.group(2))
             i += 1
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1205,6 +1232,7 @@ def _parse_section_lines(
                 i += 1
             section.lists.append(ListBlock(items=items, ordered=False))
             last_table = None
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1222,6 +1250,7 @@ def _parse_section_lines(
                     break
             section.lists.append(ListBlock(items=items_ol, ordered=True))
             last_table = None
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             continue
@@ -1240,7 +1269,10 @@ def _parse_section_lines(
 
         # Block quote: > text
         if line.startswith("> "):
-            section.paragraphs.append(Paragraph(text=line[2:]))
+            if last_fig is not None:
+                last_fig.caption_paragraphs.append(line[2:])
+            else:
+                section.paragraphs.append(Paragraph(text=line[2:]))
             i += 1
             last_table = None
             capture_table_fns = False
@@ -1248,7 +1280,10 @@ def _parse_section_lines(
             continue
 
         # Default: paragraph
-        section.paragraphs.append(Paragraph(text=line))
+        if last_fig is not None:
+            last_fig.caption_paragraphs.append(line)
+        else:
+            section.paragraphs.append(Paragraph(text=line))
         last_table = None
         capture_table_fns = False
         table_fn_collected = 0
