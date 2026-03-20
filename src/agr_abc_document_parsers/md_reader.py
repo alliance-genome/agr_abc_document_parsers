@@ -252,12 +252,13 @@ def read_markdown(text: str) -> Document:
                 for a in doc.authors if a.roles
             }
             if role_names:
-                sec.paragraphs = [
-                    p for p in sec.paragraphs
-                    if not _ROLE_LINE_RE.match(p.text.strip())
-                    or _ROLE_LINE_RE.match(p.text.strip()).group(1).strip()
-                    not in role_names
-                ]
+                kept: list[Paragraph] = []
+                for p in sec.paragraphs:
+                    m = _ROLE_LINE_RE.match(p.text.strip())
+                    if m and m.group(1).strip() in role_names:
+                        continue
+                    kept.append(p)
+                sec.paragraphs = kept
             if sec.paragraphs or sec.figures or sec.tables or sec.lists:
                 doc.sections.append(sec)
         elif heading == "References":
