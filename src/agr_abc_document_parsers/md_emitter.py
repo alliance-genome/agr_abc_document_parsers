@@ -79,7 +79,7 @@ def _emit_metadata(doc: Document, lines: list[str]) -> None:
     if doc.pages:
         cite_parts.append(doc.pages)
     if cite_parts:
-        meta_parts.append(f"**Citation:** {', '.join(cite_parts)}")
+        meta_parts.append(f"**Periodical data:** {', '.join(cite_parts)}")
     if doc.pub_date:
         meta_parts.append(f"**Published:** {doc.pub_date}")
     if doc.received_date:

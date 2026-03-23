@@ -1604,7 +1604,7 @@ def _parse_sec(sec_elem: etree._Element, level: int) -> Section:
 
     title_elem = sec_elem.find("title")
     if title_elem is not None:
-        section.heading = all_text(title_elem)
+        section.heading = _inline_text(title_elem).strip()
 
     for child in sec_elem:
         tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
@@ -2397,6 +2397,16 @@ def _extract_formula_text(elem: etree._Element) -> str:
     if tex is not None:
         tex_content = text(tex).strip()
         if tex_content and "\\documentclass" not in tex_content:
+            # Strip \begin{document}...\end{document} wrapper but keep
+            # $$ delimiters so display formulas render as math in Markdown.
+            if "\\begin{document}" in tex_content:
+                marker = "\\begin{document}"
+                idx = tex_content.find(marker)
+                end = tex_content.find("\\end{document}", idx + len(marker))
+                if end != -1:
+                    body = tex_content[idx + len(marker):end].strip()
+                    if body:
+                        return body
             return tex_content
 
     # 2. MathML — for articles with preamble-only tex-math
@@ -2687,7 +2697,7 @@ def _parse_single_app(app: etree._Element) -> Section:
     section = Section(level=1)
     title_elem = app.find("title")
     if title_elem is not None:
-        section.heading = all_text(title_elem)
+        section.heading = _inline_text(title_elem).strip()
     for sec in app.findall("sec"):
         section.subsections.append(_parse_sec(sec, level=2))
     for p in app.findall("p"):
@@ -2876,7 +2886,7 @@ def _parse_back_sections(
             section = Section(level=1)
             title_elem = child.find("title")
             if title_elem is not None:
-                section.heading = all_text(title_elem)
+                section.heading = _inline_text(title_elem).strip()
             for fn in child.findall("fn"):
                 fn_type = fn.get("fn-type", "")
                 # Skip COI footnotes already captured in doc.competing_interests
@@ -2894,7 +2904,7 @@ def _parse_back_sections(
             section = Section(level=1)
             title_elem = child.find("title")
             if title_elem is not None:
-                section.heading = all_text(title_elem)
+                section.heading = _inline_text(title_elem).strip()
             # Direct <p> children only (not descendants inside nested notes)
             for p in child.findall("./p"):
                 # If <p> contains a <list>, extract list items separately
@@ -2963,7 +2973,7 @@ def _parse_back_sections(
             section = Section(level=1)
             title_elem = child.find("title")
             if title_elem is not None:
-                section.heading = all_text(title_elem)
+                section.heading = _inline_text(title_elem).strip()
             else:
                 section.heading = "Glossary"
             _parse_glossary(child, section)

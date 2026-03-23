@@ -89,6 +89,7 @@ def read_markdown(text: str) -> Document:
         "DOI",
         "PMID",
         "PMCID",
+        "Periodical data",
         "Citation",
         "Published",
         "Received",
@@ -555,7 +556,7 @@ def _apply_metadata(doc: Document, key: str, value: str) -> None:
         doc.license_url = value
     elif key == "Copyright":
         doc.copyright = value
-    elif key == "Citation":
+    elif key in ("Periodical data", "Citation"):
         # Parse "10(2), e1004133" -> volume, issue, pages
         m = re.match(r"(\d+)(?:\(([^)]+)\))?(?:,\s*(.+))?$", value)
         if m:
