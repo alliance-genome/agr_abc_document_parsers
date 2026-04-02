@@ -130,6 +130,7 @@ def read_markdown(text: str) -> Document:
         and not lines[pos].startswith("> ")
         and not _FOOTNOTE_RE.match(lines[pos])
         and not lines[pos].rstrip().endswith(".")
+        and not lines[pos].rstrip().endswith(")")
         and "http://" not in lines[pos]
         and "https://" not in lines[pos]
         and ("," in lines[pos] or len(lines[pos]) < 80)
