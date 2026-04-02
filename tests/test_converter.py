@@ -149,8 +149,8 @@ class TestRealTeiConversion:
         assert "Isoscoparin" in md
         # Has sections
         assert "##" in md
-        # Has figures
-        assert "**Figure" in md or "**Fig" in md
+        # Has figure legends section
+        assert "## Figure Legends" in md
         # Has keywords
         assert "**Keywords:**" in md
         # Has references

@@ -116,8 +116,10 @@ def read_markdown(text: str) -> Document:
         pos = _skip_blank(lines, pos, n)
 
     # --- Author line (non-heading, non-keyword, non-bold-label before first H2) ---
-    # Author lines are typically short comma-separated names (< 300 chars)
-    # and don't end with sentence-ending punctuation.
+    # Author lines are comma-separated names, possibly with <sup> affiliations.
+    # They don't end with sentence-ending punctuation, don't contain URLs,
+    # and contain at least one comma (multiple authors) or are short (single
+    # author).
     if (
         pos < n
         and _heading_level(lines[pos]) == 0
@@ -127,8 +129,10 @@ def read_markdown(text: str) -> Document:
         and not lines[pos].startswith("- ")
         and not lines[pos].startswith("> ")
         and not _FOOTNOTE_RE.match(lines[pos])
-        and len(lines[pos]) < 300
         and not lines[pos].rstrip().endswith(".")
+        and "http://" not in lines[pos]
+        and "https://" not in lines[pos]
+        and ("," in lines[pos] or len(lines[pos]) < 80)
     ):
         doc.authors = _parse_author_line(lines[pos])
         pos += 1
@@ -248,10 +252,7 @@ def read_markdown(text: str) -> Document:
             sec.is_boxed = is_boxed
             # Remove paragraphs that were already parsed as roles
             # to avoid duplicate emission.
-            role_names = {
-                f"{a.given_name} {a.surname}".strip()
-                for a in doc.authors if a.roles
-            }
+            role_names = {f"{a.given_name} {a.surname}".strip() for a in doc.authors if a.roles}
             if role_names:
                 kept: list[Paragraph] = []
                 for p in sec.paragraphs:
@@ -262,6 +263,8 @@ def read_markdown(text: str) -> Document:
                 sec.paragraphs = kept
             if sec.paragraphs or sec.figures or sec.tables or sec.lists:
                 doc.sections.append(sec)
+        elif heading == "Figure Legends":
+            doc.figures = _parse_figure_legends(content_lines)
         elif heading == "References":
             refs = _parse_references_lines(content_lines)
             if refs:
@@ -843,6 +846,50 @@ def _parse_single_text_block(content_lines: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _parse_figure_legends(content_lines: list[str]) -> list[Figure]:
+    """Parse the content of a ``## Figure Legends`` section into Figure objects.
+
+    Each ``### Label`` subsection becomes one Figure.
+    """
+    figures: list[Figure] = []
+    sub_blocks: list[tuple[str, list[str]]] = []
+    current_heading = ""
+    current_lines: list[str] = []
+
+    for line in content_lines:
+        hl = _heading_level(line)
+        if hl == 3:
+            if current_heading or current_lines:
+                sub_blocks.append((current_heading, current_lines))
+            current_heading = _heading_text(line)
+            current_lines = []
+        else:
+            current_lines.append(line)
+
+    if current_heading or current_lines:
+        sub_blocks.append((current_heading, current_lines))
+
+    for label, lines in sub_blocks:
+        if not label:
+            continue
+        fig = Figure(label=label)
+        paragraphs: list[str] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            m_doi = _FIG_DOI_RE.match(line)
+            if m_doi:
+                fig.doi = m_doi.group(1)
+                continue
+            paragraphs.append(line)
+        if paragraphs:
+            fig.caption = paragraphs[0]
+            fig.caption_paragraphs = paragraphs[1:]
+        figures.append(fig)
+
+    return figures
+
+
 def _parse_references_lines(content_lines: list[str]) -> list[Reference]:
     """Parse numbered reference entries."""
     refs: list[Reference] = []
@@ -1201,16 +1248,11 @@ def _parse_section_lines(
                 i += 1
                 continue
 
-            # Other bold labels (e.g., Supplementary File) — treat as figure
-            fig = Figure(
-                label=label,
-                caption=caption,
-                doi=pending_fig_doi,
-            )
-            section.figures.append(fig)
-            pending_fig_doi = ""
+            # Other bold labels (e.g., **Sample.** text) — keep as
+            # paragraph to preserve the original content.
+            section.paragraphs.append(Paragraph(text=line))
             last_table = None
-            last_fig = fig
+            last_fig = None
             capture_table_fns = False
             table_fn_collected = 0
             i += 1

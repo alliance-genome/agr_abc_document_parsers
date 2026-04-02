@@ -313,12 +313,10 @@ class TestJatsParser:
         assert methods.subsections[1].heading == "Sequencing"
 
     def test_parse_figures(self):
-        """<fig> with label, caption."""
+        """<fig> with label, caption — collected into doc.figures."""
         doc = parse_jats(FULL_JATS)
-        results = doc.sections[2]
-        assert len(results.figures) == 1
-        fig = results.figures[0]
-        assert fig.label == "Figure 1"
+        assert any(f.label == "Figure 1" for f in doc.figures)
+        fig = next(f for f in doc.figures if f.label == "Figure 1")
         assert "conservation" in fig.caption.lower()
 
     def test_parse_tables(self):
@@ -1928,7 +1926,7 @@ class TestNlmCitation:
 
 class TestGroupContainers:
     def test_fig_group_in_section(self):
-        """<fig-group> children unpacked into section.figures."""
+        """<fig-group> children collected into doc.figures."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -1942,10 +1940,9 @@ class TestGroupContainers:
           </fig-group>
         </sec></body></article>"""
         doc = parse_jats(xml)
-        sec = doc.sections[0]
-        assert len(sec.figures) == 2
-        assert sec.figures[0].label == "Figure 1"
-        assert sec.figures[1].label == "Figure 2"
+        assert len(doc.figures) == 2
+        assert doc.figures[0].label == "Figure 1"
+        assert doc.figures[1].label == "Figure 2"
 
     def test_table_wrap_group_in_section(self):
         """<table-wrap-group> children unpacked into section.tables."""
@@ -1988,7 +1985,7 @@ class TestGroupContainers:
         assert "F = ma" in sec.formulas[1].text
 
     def test_fig_group_at_body_level(self):
-        """<fig-group> as direct child of <body> handled."""
+        """<fig-group> as direct child of <body> collected into doc.figures."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -1999,9 +1996,8 @@ class TestGroupContainers:
           </fig-group>
         </body></article>"""
         doc = parse_jats(xml)
-        assert len(doc.sections) == 1
-        assert len(doc.sections[0].figures) == 1
-        assert doc.sections[0].figures[0].label == "Figure 1"
+        assert len(doc.figures) == 1
+        assert doc.figures[0].label == "Figure 1"
 
 
 # -- Fallback text extraction for unknown block elements -------------------
@@ -2409,10 +2405,9 @@ class TestStandaloneGraphic:
                    xlink:href="image1.tif"/>
         </sec></body></article>"""
         doc = parse_jats(xml)
-        sec = doc.sections[0]
-        assert len(sec.figures) == 1
-        assert sec.figures[0].graphic_url == "image1.tif"
-        assert sec.figures[0].label == ""
+        assert len(doc.figures) == 1
+        assert doc.figures[0].graphic_url == "image1.tif"
+        assert doc.figures[0].label == ""
 
     def test_graphic_with_alt_text(self):
         """Standalone <graphic> with <alt-text> child."""
@@ -2426,7 +2421,7 @@ class TestStandaloneGraphic:
           </graphic>
         </sec></body></article>"""
         doc = parse_jats(xml)
-        fig = doc.sections[0].figures[0]
+        fig = doc.figures[0]
         assert fig.graphic_url == "diagram.png"
         assert fig.alt_text == "Schematic of the pathway"
 
@@ -2440,12 +2435,11 @@ class TestStandaloneGraphic:
                    xlink:href="body-graphic.jpg"/>
         </body></article>"""
         doc = parse_jats(xml)
-        assert len(doc.sections) == 1
-        assert len(doc.sections[0].figures) == 1
-        assert doc.sections[0].figures[0].graphic_url == "body-graphic.jpg"
+        assert len(doc.figures) == 1
+        assert doc.figures[0].graphic_url == "body-graphic.jpg"
 
     def test_graphic_inside_p(self):
-        """<graphic> inside <p> extracted and text split."""
+        """<graphic> inside <p> extracted into doc.figures."""
         xml = b"""<article><front><article-meta>
           <title-group><article-title>T</article-title></title-group>
         </article-meta></front>
@@ -2456,9 +2450,9 @@ class TestStandaloneGraphic:
           After image.</p>
         </sec></body></article>"""
         doc = parse_jats(xml)
+        assert len(doc.figures) == 1
+        assert doc.figures[0].graphic_url == "inline.png"
         sec = doc.sections[0]
-        assert len(sec.figures) == 1
-        assert sec.figures[0].graphic_url == "inline.png"
         assert len(sec.paragraphs) == 2
         assert "Before image" in sec.paragraphs[0].text
         assert "After image" in sec.paragraphs[1].text
@@ -2732,7 +2726,7 @@ class TestBreakElement:
           </fig>
         </sec></body></article>"""
         doc = parse_jats(xml)
-        fig = doc.sections[0].figures[0]
+        fig = next(f for f in doc.figures if "Figure 1" in f.label)
         # Caption uses _inline_text which should preserve break as \n
         assert "Panel A" in fig.caption
         assert "Panel B" in fig.caption
@@ -4427,3 +4421,127 @@ class TestMetadataRoundTrip:
         ref_idx = next(i for i, ln in enumerate(lines) if "## References" in ln)
         digest_idx = next(i for i, ln in enumerate(lines) if "eLife digest" in ln)
         assert ref_idx < digest_idx
+
+
+class TestFigureXrefLinkification:
+    """Test that <xref ref-type='fig'> becomes a Markdown link."""
+
+    def test_fig_xref_becomes_link(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Results</title>
+            <p>See <xref ref-type="fig" rid="fig1">Fig. 1</xref> for details.</p>
+            <fig id="fig1"><label>Fig. 1</label>
+              <caption><title>My caption.</title></caption>
+            </fig>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert any("[Fig. 1](#fig-1)" in p.text for p in doc.sections[0].paragraphs)
+
+    def test_figure_xref_becomes_link(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Results</title>
+            <p>As shown in <xref ref-type="fig" rid="f2">Figure 2</xref>.</p>
+            <fig id="f2"><label>Figure 2</label>
+              <caption><title>Caption two.</title></caption>
+            </fig>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert any("[Figure 2](#figure-2)" in p.text for p in doc.sections[0].paragraphs)
+
+    def test_non_fig_xref_unchanged(self):
+        """xref with ref-type='bibr' should NOT be linkified."""
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Intro</title>
+            <p>See <xref ref-type="bibr" rid="b1">1</xref>.</p>
+          </sec></body>
+        </article>"""
+        doc = parse_jats(xml)
+        text = doc.sections[0].paragraphs[0].text
+        assert "](#" not in text
+
+
+class TestFigureCollection:
+    """Test that all figures are collected into doc.figures."""
+
+    def test_section_figures_moved_to_doc(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body>
+            <sec><title>Results</title>
+              <fig><label>Figure 1</label>
+                <caption><title>Cap 1.</title></caption>
+              </fig>
+            </sec>
+            <sec><title>Discussion</title>
+              <fig><label>Figure 2</label>
+                <caption><title>Cap 2.</title></caption>
+              </fig>
+            </sec>
+          </body>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.figures) == 2
+        assert doc.figures[0].label.startswith("Figure 1")
+        assert doc.figures[1].label.startswith("Figure 2")
+        for sec in doc.sections:
+            assert len(sec.figures) == 0
+
+    def test_floats_group_figures_collected(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body><sec><title>Results</title>
+            <p>Text.</p>
+          </sec></body>
+          <floats-group>
+            <fig><label>Figure 1</label>
+              <caption><title>Cap 1.</title></caption>
+            </fig>
+          </floats-group>
+        </article>"""
+        doc = parse_jats(xml)
+        assert len(doc.figures) == 1
+        assert doc.figures[0].label.startswith("Figure 1")
+
+    def test_figures_sorted_by_number(self):
+        xml = b"""<article>
+          <front><article-meta>
+            <title-group><article-title>T</article-title></title-group>
+          </article-meta></front>
+          <body>
+            <sec><title>Discussion</title>
+              <fig><label>Figure 3</label>
+                <caption><title>C3.</title></caption>
+              </fig>
+            </sec>
+            <sec><title>Results</title>
+              <fig><label>Figure 1</label>
+                <caption><title>C1.</title></caption>
+              </fig>
+            </sec>
+          </body>
+          <floats-group>
+            <fig><label>Figure 2</label>
+              <caption><title>C2.</title></caption>
+            </fig>
+          </floats-group>
+        </article>"""
+        doc = parse_jats(xml)
+        labels = [f.label for f in doc.figures]
+        assert "Figure 1" in labels[0]
+        assert "Figure 2" in labels[1]
+        assert "Figure 3" in labels[2]

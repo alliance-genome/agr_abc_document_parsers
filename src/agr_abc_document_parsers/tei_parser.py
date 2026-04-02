@@ -19,6 +19,8 @@ from agr_abc_document_parsers.models import (
     Section,
     Table,
     TableCell,
+    _collect_figures_to_doc,
+    figure_anchor_id,
 )
 from agr_abc_document_parsers.xml_utils import (
     all_text,
@@ -64,6 +66,9 @@ def parse_tei(
     back_matter = _parse_annex(root)
     back_matter.extend(_parse_additional_back(root))
     doc.back_matter = back_matter
+
+    # Consolidate all figures into doc.figures (from sections + top-level)
+    _collect_figures_to_doc(doc)
 
     return doc
 
@@ -325,7 +330,16 @@ def _inline_text_tei(elem: etree._Element) -> str:
         if tag == "hi":
             parts.append(_format_hi(child))
         elif tag == "ref":
-            parts.append(all_text(child))
+            ref_text = all_text(child)
+            ref_type = child.get("type", "")
+            if ref_type == "figure":
+                anchor = figure_anchor_id(ref_text)
+                if anchor:
+                    parts.append(f"[{ref_text}](#{anchor})")
+                else:
+                    parts.append(ref_text)
+            else:
+                parts.append(ref_text)
         else:
             parts.append(all_text(child))
         if child.tail:
@@ -353,9 +367,17 @@ def _parse_inline(elem: etree._Element, parts: list[str], refs: list[InlineRef])
     if tag == "ref":
         ref_text = all_text(elem)
         ref_target = elem.get("target", "")
+        ref_type = elem.get("type", "")
         if ref_text:
             refs.append(InlineRef(text=ref_text, target=ref_target))
-            parts.append(ref_text)
+            if ref_type == "figure":
+                anchor = figure_anchor_id(ref_text)
+                if anchor:
+                    parts.append(f"[{ref_text}](#{anchor})")
+                else:
+                    parts.append(ref_text)
+            else:
+                parts.append(ref_text)
     elif tag == "hi":
         parts.append(_format_hi(elem))
     else:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
+
 from agr_abc_document_parsers.models import (
     Document,
-    Figure,
     ListBlock,
     Reference,
     Section,
@@ -12,6 +13,16 @@ from agr_abc_document_parsers.models import (
 )
 
 MAX_HEADING_LEVEL = 6
+
+# Pattern to extract a bold figure label from caption text, e.g.
+# "**Figure 1.** Caption text" → label="Figure 1", rest="Caption text"
+_CAPTION_LABEL_RE = re.compile(
+    r"^\*\*("
+    r"(?:Supplementary\s+)?"
+    r"(?:Figure|Fig\.)\s*\S+"
+    r")\.\*\*\s*(.*)",
+    re.DOTALL,
+)
 
 
 def emit_markdown(doc: Document) -> str:
@@ -33,7 +44,6 @@ def emit_markdown(doc: Document) -> str:
     _emit_keywords(doc, lines)
     footnote_counter = [0]  # mutable counter shared across sections
     _emit_sections(doc.sections, lines, base_level=2, footnote_counter=footnote_counter)
-    _emit_doc_level_figures(doc, lines)
     _emit_doc_level_tables(doc, lines)
     _emit_acknowledgments(doc, lines)
     _emit_funding(doc, lines)
@@ -41,6 +51,7 @@ def emit_markdown(doc: Document) -> str:
     _emit_competing_interests(doc, lines)
     _emit_data_availability(doc, lines)
     _emit_back_matter(doc, lines, footnote_counter=footnote_counter)
+    _emit_figure_legends(doc, lines)
     _emit_references(doc, lines)
     _emit_author_roles(doc, lines)
     _emit_secondary_abstracts(doc, lines)
@@ -222,10 +233,6 @@ def _emit_section(
         lines.append(para.text)
         lines.append("")
 
-    # Figures
-    for fig in section.figures:
-        _emit_figure(fig, lines)
-
     # Tables
     for table in section.tables:
         _emit_table(table, lines)
@@ -366,38 +373,42 @@ def _emit_list(lst: ListBlock, lines: list[str]) -> None:
     lines.append("")
 
 
-def _emit_figure(fig: Figure, lines: list[str]) -> None:
-    """Emit a single figure caption and optional alt-text."""
-    if fig.doi:
-        lines.append(f"<!-- doi: {fig.doi} -->")
-        lines.append("")
-    label = fig.label.rstrip(".:").strip()
-    if label:
-        if fig.caption:
-            lines.append(f"**{label}.** {fig.caption}")
-        else:
-            lines.append(f"**{label}.**")
-    elif fig.caption:
-        lines.append(fig.caption)
-    else:
-        if not fig.alt_text and not fig.attrib and not fig.caption_paragraphs:
-            return
+def _emit_figure_legends(doc: Document, lines: list[str]) -> None:
+    """Emit all figures in a dedicated '## Figure Legends' section."""
+    if not doc.figures:
+        return
+    lines.append("## Figure Legends")
     lines.append("")
-    for cp in fig.caption_paragraphs:
-        lines.append(cp)
-        lines.append("")
-    if fig.alt_text:
-        lines.append(fig.alt_text)
-        lines.append("")
-    if fig.attrib:
-        lines.append(fig.attrib)
-        lines.append("")
-
-
-def _emit_doc_level_figures(doc: Document, lines: list[str]) -> None:
-    """Emit figures that are at document level (not inside sections)."""
     for fig in doc.figures:
-        _emit_figure(fig, lines)
+        label = fig.label.rstrip(".:").strip()
+        caption = fig.caption
+        # When label is empty but caption contains a bold figure label
+        # (e.g. "**Figure 1.** Caption"), extract the label from it.
+        if not label and caption:
+            m = _CAPTION_LABEL_RE.match(caption)
+            if m:
+                label = m.group(1).rstrip(".:").strip()
+                caption = m.group(2).strip()
+        if not label and not caption and not fig.alt_text and not fig.attrib:
+            continue
+        if label:
+            lines.append(f"### {label}")
+        lines.append("")
+        if fig.doi:
+            lines.append(f"<!-- doi: {fig.doi} -->")
+            lines.append("")
+        if caption:
+            lines.append(caption)
+            lines.append("")
+        for cp in fig.caption_paragraphs:
+            lines.append(cp)
+            lines.append("")
+        if fig.alt_text:
+            lines.append(fig.alt_text)
+            lines.append("")
+        if fig.attrib:
+            lines.append(fig.attrib)
+            lines.append("")
 
 
 def _emit_doc_level_tables(doc: Document, lines: list[str]) -> None:
@@ -497,11 +508,9 @@ def _emit_back_matter(
                 lines.append(f"[^{footnote_counter[0]}]: {item}")
         if section.paragraphs or section.notes or section.lists:
             lines.append("")
-        # Tables and figures in headingless sections
+        # Tables in headingless sections
         for table in section.tables:
             _emit_table(table, lines)
-        for fig in section.figures:
-            _emit_figure(fig, lines)
         # Emit headed subsections (e.g. appendix sections)
         headed_subs = [s for s in section.subsections if s.heading]
         if headed_subs:

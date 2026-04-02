@@ -23,6 +23,8 @@ from agr_abc_document_parsers.models import (
     Section,
     Table,
     TableCell,
+    _collect_figures_to_doc,
+    figure_anchor_id,
 )
 from agr_abc_document_parsers.xml_utils import (
     all_text,
@@ -163,6 +165,9 @@ def parse_jats(
 
     # Sub-articles (decision letters, author responses, etc.)
     doc.sub_articles = _parse_sub_articles(root)
+
+    # Consolidate all figures into doc.figures (from sections + floats-group)
+    _collect_figures_to_doc(doc)
 
     return doc
 
@@ -1809,9 +1814,17 @@ def _parse_paragraph(
                 else ref_text
             )
             rid = child.get("rid", "")
+            ref_type = child.get("ref-type", "")
             if ref_text:
                 refs.append(InlineRef(text=ref_text, target=rid))
-                parts.append(display_text)
+                if ref_type == "fig":
+                    anchor = figure_anchor_id(ref_text)
+                    if anchor:
+                        parts.append(f"[{display_text}](#{anchor})")
+                    else:
+                        parts.append(display_text)
+                else:
+                    parts.append(display_text)
         elif tag in ("ext-link", "uri"):
             link_text = all_text(child)
             href = child.get("{http://www.w3.org/1999/xlink}href", "")
@@ -2404,7 +2417,7 @@ def _extract_formula_text(elem: etree._Element) -> str:
                 idx = tex_content.find(marker)
                 end = tex_content.find("\\end{document}", idx + len(marker))
                 if end != -1:
-                    body = tex_content[idx + len(marker):end].strip()
+                    body = tex_content[idx + len(marker) : end].strip()
                     if body:
                         return body
             return tex_content

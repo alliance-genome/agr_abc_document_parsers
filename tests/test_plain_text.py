@@ -141,13 +141,11 @@ class TestExtractPlainText:
     def test_figures_captions(self):
         doc = Document(
             sections=[
-                Section(
-                    heading="Results",
-                    figures=[
-                        Figure(label="Figure 1", caption="Expression of *BRCA1*."),
-                    ],
-                ),
-            ]
+                Section(heading="Results"),
+            ],
+            figures=[
+                Figure(label="Figure 1", caption="Expression of *BRCA1*."),
+            ],
         )
         result = extract_plain_text(doc)
         assert "Expression of BRCA1." in result

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Union
@@ -13,6 +14,83 @@ DocumentInput = Union[str, bytes]
 
 # Accepted values for the ``format`` parameter.
 Format = Literal["auto", "tei", "jats", "markdown"]
+
+# ---------------------------------------------------------------------------
+# Figure anchor ID generation
+# ---------------------------------------------------------------------------
+
+_ANCHOR_STRIP_RE = re.compile(r"[.:]+$")
+_ANCHOR_COLLAPSE_RE = re.compile(r"-{2,}")
+_ANCHOR_NONALNUM_RE = re.compile(r"[^a-z0-9]+")
+
+
+def figure_anchor_id(label: str) -> str:
+    """Convert a figure label to a URL-safe Markdown anchor ID.
+
+    Examples:
+        >>> figure_anchor_id("Figure 1")
+        'figure-1'
+        >>> figure_anchor_id("Fig. 1")
+        'fig-1'
+    """
+    if not label:
+        return ""
+    s = _ANCHOR_STRIP_RE.sub("", label).strip()
+    s = s.lower()
+    s = _ANCHOR_NONALNUM_RE.sub("-", s)
+    s = _ANCHOR_COLLAPSE_RE.sub("-", s)
+    s = s.strip("-")
+    return s
+
+
+# ---------------------------------------------------------------------------
+# Figure collection helper (used by both JATS and TEI parsers)
+# ---------------------------------------------------------------------------
+
+_FIG_NUM_RE = re.compile(r"(\d+)")
+
+
+def _collect_figures_to_doc(doc: Document) -> None:
+    """Move all section-level figures into doc.figures and sort by label number.
+
+    Called at the end of both ``parse_jats()`` and ``parse_tei()`` to
+    consolidate figures from sections and back-matter into the
+    document-level list.
+    """
+    collected: list[Figure] = []
+
+    def _walk_sections(sections: list[Section]) -> None:
+        for section in sections:
+            collected.extend(section.figures)
+            section.figures = []
+            _walk_sections(section.subsections)
+
+    _walk_sections(doc.sections)
+    _walk_sections(doc.back_matter)
+
+    # Merge: section-collected figures first, then existing doc.figures
+    all_figs = collected + doc.figures
+    doc.figures = []
+
+    # Deduplicate by label (keep first occurrence)
+    seen_labels: set[str] = set()
+    for fig in all_figs:
+        key = fig.label.rstrip(".:").strip().lower()
+        if key and key in seen_labels:
+            continue
+        if key:
+            seen_labels.add(key)
+        doc.figures.append(fig)
+
+    # Sort: main figures by number, then supplementary by number
+    def _sort_key(fig: Figure) -> tuple[int, int]:
+        label = fig.label.lower()
+        is_supp = 1 if "supplement" in label or label.startswith("s") else 0
+        m = _FIG_NUM_RE.search(fig.label)
+        num = int(m.group(1)) if m else 9999
+        return (is_supp, num)
+
+    doc.figures.sort(key=_sort_key)
 
 
 @dataclass

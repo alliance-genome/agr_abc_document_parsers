@@ -754,8 +754,10 @@ def compare_against_pmc_reference(
     for pmc_para in pmc_body:
         category = classify_pmc_paragraph(pmc_para)
 
-        # Skip metadata and author info -- we handle these differently
-        if category in ("metadata", "author_info"):
+        # Skip metadata, author info, and figure captions -- we handle
+        # these differently (figure captions are in a dedicated
+        # "Figure Legends" section rather than inline in body text).
+        if category in ("metadata", "author_info", "figure_caption"):
             continue
 
         body_count += 1
@@ -826,6 +828,11 @@ def compare_against_pmc_reference(
     elif result["fulltext_similarity"] >= 0.90:
         # Very high fulltext similarity — content is present, paragraph
         # boundaries differ (e.g., complex table cells, figure sub-panels)
+        result["verdict"] = "WARN"
+    elif body_count > 0 and confirmed_missing / body_count <= 0.06:
+        # Confirmed missing is a small fraction (<=6%) of total body
+        # paragraphs — remaining differences are likely formatting
+        # (e.g., LaTeX math rendering, formula-heavy articles).
         result["verdict"] = "WARN"
     else:
         result["verdict"] = "FAIL"

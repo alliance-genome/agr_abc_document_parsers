@@ -477,12 +477,10 @@ class TestTeiParser:
         assert intro.paragraphs[1].refs[0].text == "(Jones, 2020)"
 
     def test_parse_figures(self):
-        """<figure> elements with head, figDesc, graphic."""
+        """<figure> elements collected into doc.figures."""
         doc = parse_tei(FULL_TEI)
-        results = doc.sections[2]
-        assert len(results.figures) == 1
-        fig = results.figures[0]
-        assert "Figure 1" in fig.label
+        assert any("Figure 1" in f.label for f in doc.figures)
+        fig = next(f for f in doc.figures if "Figure 1" in f.label)
         assert "Expression levels" in fig.caption
         assert fig.graphic_url == "fig1.png"
 
@@ -1159,3 +1157,87 @@ class TestTeiParser:
         assert "\n" not in para
         assert "  " not in para
         assert "Text with [1] and more text." == para
+
+
+class TestFigureRefLinkification:
+    """Test that <ref type='figure'> becomes a Markdown link."""
+
+    def test_figure_ref_becomes_link(self):
+        xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <teiHeader><fileDesc><titleStmt>
+            <title>T</title>
+          </titleStmt><publicationStmt><p/></publicationStmt>
+          <sourceDesc><p/></sourceDesc></fileDesc></teiHeader>
+          <text><body>
+            <div><head>Results</head>
+              <p>See Fig. <ref type="figure">1</ref> for details.</p>
+            </div>
+            <figure><head>Figure 1</head>
+              <figDesc>My caption.</figDesc>
+            </figure>
+          </body></text>
+        </TEI>"""
+        doc = parse_tei(xml)
+        assert any("[1](#1)" in p.text for p in doc.sections[0].paragraphs)
+
+    def test_figure_ref_with_target(self):
+        xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <teiHeader><fileDesc><titleStmt>
+            <title>T</title>
+          </titleStmt><publicationStmt><p/></publicationStmt>
+          <sourceDesc><p/></sourceDesc></fileDesc></teiHeader>
+          <text><body>
+            <div><head>Results</head>
+              <p>See <ref type="figure" target="#fig_0">Figure 1</ref>.</p>
+            </div>
+            <figure xml:id="fig_0"><head>Figure 1</head>
+              <figDesc>Caption.</figDesc>
+            </figure>
+          </body></text>
+        </TEI>"""
+        doc = parse_tei(xml)
+        assert any("[Figure 1](#figure-1)" in p.text for p in doc.sections[0].paragraphs)
+
+    def test_biblio_ref_not_linkified(self):
+        """<ref type='biblio'> should NOT be linkified as a figure."""
+        xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <teiHeader><fileDesc><titleStmt>
+            <title>T</title>
+          </titleStmt><publicationStmt><p/></publicationStmt>
+          <sourceDesc><p/></sourceDesc></fileDesc></teiHeader>
+          <text><body>
+            <div><head>Intro</head>
+              <p>As shown <ref type="biblio">previously</ref>.</p>
+            </div>
+          </body></text>
+        </TEI>"""
+        doc = parse_tei(xml)
+        text = doc.sections[0].paragraphs[0].text
+        assert "](#" not in text
+
+
+class TestTEIFigureCollection:
+    """Test that all figures are collected into doc.figures."""
+
+    def test_section_figures_moved_to_doc(self):
+        xml = b"""<TEI xmlns="http://www.tei-c.org/ns/1.0">
+          <teiHeader><fileDesc><titleStmt>
+            <title>T</title>
+          </titleStmt><publicationStmt><p/></publicationStmt>
+          <sourceDesc><p/></sourceDesc></fileDesc></teiHeader>
+          <text><body>
+            <div><head>Results</head>
+              <p>Text.</p>
+              <figure><head>Figure 1</head>
+                <figDesc>C1.</figDesc>
+              </figure>
+            </div>
+            <figure><head>Figure 2</head>
+              <figDesc>C2.</figDesc>
+            </figure>
+          </body></text>
+        </TEI>"""
+        doc = parse_tei(xml)
+        assert len(doc.figures) == 2
+        for sec in doc.sections:
+            assert len(sec.figures) == 0

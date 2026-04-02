@@ -127,17 +127,17 @@ class TestReadMarkdownBasic:
         assert sec.subsections[1].heading == "Analysis"
 
     def test_figures(self):
-        md = "## Results\n\n**Figure 1.** Expression levels.\n"
+        md = "# Paper\n\n## Figure Legends\n\n### Figure 1\n\nExpression levels.\n\n"
         doc = read_markdown(md)
-        assert len(doc.sections[0].figures) == 1
-        fig = doc.sections[0].figures[0]
+        assert len(doc.figures) == 1
+        fig = doc.figures[0]
         assert fig.label == "Figure 1"
         assert fig.caption == "Expression levels."
 
     def test_figure_no_caption(self):
-        md = "## Results\n\n**Figure 1.**\n"
+        md = "# Paper\n\n## Figure Legends\n\n### Figure 1\n\n"
         doc = read_markdown(md)
-        fig = doc.sections[0].figures[0]
+        fig = doc.figures[0]
         assert fig.label == "Figure 1"
         assert fig.caption == ""
 
@@ -477,14 +477,9 @@ class TestRoundTrip:
         self._assert_round_trip(
             _make_doc(
                 title="Paper",
-                sections=[
-                    Section(
-                        heading="Results",
-                        figures=[
-                            Figure(label="Figure 1", caption="Expression levels."),
-                            Figure(label="Figure 2", caption="Protein levels."),
-                        ],
-                    ),
+                figures=[
+                    Figure(label="Figure 1", caption="Expression levels."),
+                    Figure(label="Figure 2", caption="Protein levels."),
                 ],
             )
         )
@@ -1038,6 +1033,69 @@ class TestRoundTripNewFeatures:
                 ],
             )
         )
+
+
+class TestFigureLegends:
+    """Tests for parsing the ## Figure Legends section."""
+
+    def test_figure_legends_section_parsed(self):
+        md = (
+            "# Paper\n\n"
+            "## Results\n\nSome text.\n\n"
+            "## Figure Legends\n\n"
+            "### Figure 1\n\nExpression levels.\n\n"
+            "### Figure 2\n\nProtein levels.\n\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.figures) == 2
+        assert doc.figures[0].label == "Figure 1"
+        assert doc.figures[0].caption == "Expression levels."
+        assert doc.figures[1].label == "Figure 2"
+        assert doc.figures[1].caption == "Protein levels."
+        headings = [s.heading for s in doc.sections]
+        assert "Figure Legends" not in headings
+
+    def test_figure_legends_with_doi(self):
+        md = (
+            "# Paper\n\n"
+            "## Figure Legends\n\n"
+            "### Fig. 1\n\n"
+            "<!-- doi: 10.1234/test -->\n\n"
+            "My caption.\n\n"
+        )
+        doc = read_markdown(md)
+        assert len(doc.figures) == 1
+        assert doc.figures[0].label == "Fig. 1"
+        assert doc.figures[0].doi == "10.1234/test"
+        assert doc.figures[0].caption == "My caption."
+
+    def test_figure_legends_with_caption_paragraphs(self):
+        md = (
+            "# Paper\n\n"
+            "## Figure Legends\n\n"
+            "### Figure 1\n\n"
+            "Main caption.\n\n"
+            "(A) First panel.\n\n"
+            "(B) Second panel.\n\n"
+        )
+        doc = read_markdown(md)
+        fig = doc.figures[0]
+        assert fig.caption == "Main caption."
+        assert fig.caption_paragraphs == ["(A) First panel.", "(B) Second panel."]
+
+    def test_figure_legends_not_in_sections(self):
+        md = (
+            "# Paper\n\n"
+            "## Results\n\nText.\n\n"
+            "## Figure Legends\n\n"
+            "### Figure 1\n\nCap.\n\n"
+            "## References\n\n"
+            "1. Ref.\n\n"
+        )
+        doc = read_markdown(md)
+        section_headings = [s.heading for s in doc.sections]
+        assert "Figure Legends" not in section_headings
+        assert len(doc.figures) == 1
 
 
 class TestReadMarkdownNewFields:

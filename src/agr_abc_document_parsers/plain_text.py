@@ -377,9 +377,6 @@ def _collect_sections_text(sections: list[Section], parts: list[str]) -> None:
         for para in section.paragraphs:
             parts.append(strip_markdown_formatting(para.text))
 
-        for fig in section.figures:
-            _collect_figure_text(fig, parts)
-
         for table in section.tables:
             _collect_table_text(table, parts)
 

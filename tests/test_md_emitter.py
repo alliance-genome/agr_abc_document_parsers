@@ -225,20 +225,18 @@ class TestMdEmitter:
         assert "####### " not in md
 
     def test_emit_figures(self):
-        """'**Figure 1.** Caption text'."""
+        """Figures emitted in '## Figure Legends' section."""
         doc = _make_doc(
             sections=[
-                Section(
-                    heading="Results",
-                    level=1,
-                    figures=[
-                        Figure(label="Figure 1.", caption="Expression levels across conditions."),
-                    ],
-                ),
-            ]
+                Section(heading="Results", level=1),
+            ],
+            figures=[
+                Figure(label="Figure 1", caption="Expression levels across conditions."),
+            ],
         )
         md = emit_markdown(doc)
-        assert "**Figure 1.**" in md
+        assert "## Figure Legends" in md
+        assert "### Figure 1" in md
         assert "Expression levels across conditions." in md
 
     def test_emit_tables_gfm(self):
@@ -793,3 +791,68 @@ class TestMdEmitterNewSections:
         fund_idx = next(i for i, ln in enumerate(lines) if "## Funding" in ln)
         ref_idx = next(i for i, ln in enumerate(lines) if "## References" in ln)
         assert ack_idx < fund_idx < ref_idx
+
+
+class TestFigureLegends:
+    def test_figure_legends_section_emitted(self):
+        doc = _make_doc(
+            sections=[
+                Section(heading="Results", level=1),
+            ],
+            figures=[
+                Figure(label="Figure 1", caption="Cap one."),
+                Figure(label="Figure 2", caption="Cap two."),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "## Figure Legends" in md
+        assert "### Figure 1" in md
+        assert "Cap one." in md
+        assert "### Figure 2" in md
+        assert "Cap two." in md
+
+    def test_no_figure_legends_when_empty(self):
+        doc = _make_doc(
+            sections=[
+                Section(heading="Results", level=1),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "Figure Legends" not in md
+
+    def test_figure_legends_before_references(self):
+        doc = _make_doc(
+            figures=[Figure(label="Figure 1", caption="Cap.")],
+            references=[
+                Reference(index=1, title="Ref title.", year="2020"),
+            ],
+        )
+        md = emit_markdown(doc)
+        fl_pos = md.index("## Figure Legends")
+        ref_pos = md.index("## References")
+        assert fl_pos < ref_pos
+
+    def test_figure_with_doi_and_caption_paragraphs(self):
+        doc = _make_doc(
+            figures=[
+                Figure(
+                    label="Figure 1",
+                    caption="Main caption.",
+                    doi="10.1234/test",
+                    caption_paragraphs=[
+                        "(A) First panel.",
+                        "(B) Second panel.",
+                    ],
+                    alt_text="Alt description.",
+                    attrib="Source: someone.",
+                ),
+            ],
+        )
+        md = emit_markdown(doc)
+        assert "### Figure 1" in md
+        assert "<!-- doi: 10.1234/test -->" in md
+        assert "Main caption." in md
+        assert "(A) First panel." in md
+        assert "(B) Second panel." in md
+        assert "Alt description." in md
+        assert "Source: someone." in md
