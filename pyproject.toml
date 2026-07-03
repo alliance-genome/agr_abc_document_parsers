@@ -97,6 +97,14 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 
+# Optional embedding deps (the [embeddings] extra) are not installed in the
+# default lint/test job, and neither ships type stubs. The embeddings subpackage
+# imports them lazily and annotates their surfaces as Any, so treat them as
+# untyped rather than failing on a missing stub.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*", "tiktoken"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

@@ -20,8 +20,6 @@ from agr_abc_document_parsers.embeddings import (
     content_preview,
 )
 
-tiktoken = pytest.importorskip("tiktoken", reason="embeddings extra not installed")
-
 CURIE = "AGRKB:101000000000001"
 
 # ABC merged-markdown format: H1 = title, H2 = Abstract / body sections /
@@ -106,6 +104,7 @@ def test_interfaces_are_abstract():
 
 
 def test_paragraph_pack_excludes_references_and_orders_reading():
+    pytest.importorskip("tiktoken", reason="embeddings extra not installed")
     chunks = ParagraphPackChunker().chunk(SAMPLE_MD, reference_curie=CURIE)
     assert chunks, "expected at least one chunk"
     joined = "\n".join(c.content for c in chunks)
@@ -125,6 +124,7 @@ def test_paragraph_pack_excludes_references_and_orders_reading():
 
 
 def test_paragraph_pack_section_boundaries_start_new_chunks():
+    pytest.importorskip("tiktoken", reason="embeddings extra not installed")
     chunks = ParagraphPackChunker().chunk(SAMPLE_MD, reference_curie=CURIE)
     titles = {c.section_title for c in chunks}
     assert "Introduction" in titles
@@ -136,6 +136,7 @@ def test_paragraph_pack_section_boundaries_start_new_chunks():
 
 
 def test_paragraph_pack_splits_oversized_paragraph_on_token_windows():
+    pytest.importorskip("tiktoken", reason="embeddings extra not installed")
     # H1 title + an H2 section whose single paragraph is ~2000 tokens.
     big = "# Title\n\n## Body\n\n" + ("token " * 2000)
     chunks = ParagraphPackChunker(target_tokens=512).chunk(big, reference_curie=CURIE)
