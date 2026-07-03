@@ -48,6 +48,13 @@ dev = [
     "mypy>=1.0.0",
     "lxml-stubs>=0.4.0",
 ]
+# Embedding pipeline (SCRUM-6139): token-based chunking (tiktoken) and the
+# canonical embedding parquet I/O (pyarrow). Kept optional so the core parsing
+# library stays lightweight; imported lazily by agr_abc_document_parsers.embeddings.
+embeddings = [
+    "tiktoken>=0.5",
+    "pyarrow>=12",
+]
 
 [project.urls]
 Homepage = "https://github.com/alliance-genome/agr_abc_document_parsers"
