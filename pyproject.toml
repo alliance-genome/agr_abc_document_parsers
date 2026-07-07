@@ -48,6 +48,13 @@ dev = [
     "mypy>=1.0.0",
     "lxml-stubs>=0.4.0",
 ]
+# Embedding pipeline (SCRUM-6139): token-based chunking (tiktoken) and the
+# canonical embedding parquet I/O (pyarrow). Kept optional so the core parsing
+# library stays lightweight; imported lazily by agr_abc_document_parsers.embeddings.
+embeddings = [
+    "tiktoken>=0.5",
+    "pyarrow>=12",
+]
 
 [project.urls]
 Homepage = "https://github.com/alliance-genome/agr_abc_document_parsers"
@@ -89,6 +96,14 @@ python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+# Optional embedding deps (the [embeddings] extra) are not installed in the
+# default lint/test job, and neither ships type stubs. The embeddings subpackage
+# imports them lazily and annotates their surfaces as Any, so treat them as
+# untyped rather than failing on a missing stub.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*", "tiktoken"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
