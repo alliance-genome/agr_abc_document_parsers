@@ -90,7 +90,25 @@ def test_recipe_metadata_stringifies_and_drops_none():
     assert meta["references_excluded"] == "true"
     assert meta["chunk_count"] == "7"
     assert "chunk_max_characters" not in meta  # None dropped
+    # character-based overlap / source-kind fields default to None and drop out
+    assert "chunk_overlap_characters" not in meta
+    assert "source_text_kind" not in meta
     assert all(isinstance(v, str) for v in meta.values())
+
+
+def test_recipe_metadata_carries_character_and_source_kind_fields():
+    """Character-based profiles (e.g. by_title) record overlap in characters, and
+    the source-text kind is stamped so an importer can reject a mismatched file."""
+    recipe = EmbeddingRecipe(
+        profile_name="curation_assistant_v1", version=1,
+        embedding_model="text-embedding-3-small", embedding_dim=1536,
+        chunker_name="by_title", chunk_max_characters=1500,
+        chunk_overlap_characters=200, source_text_kind="converted_merged_main",
+    )
+    meta = recipe.as_metadata(reference_curie=CURIE, chunk_count=3)
+    assert meta["chunk_overlap_characters"] == "200"
+    assert meta["chunk_max_characters"] == "1500"
+    assert meta["source_text_kind"] == "converted_merged_main"
 
 
 def test_interfaces_are_abstract():

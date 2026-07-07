@@ -125,7 +125,12 @@ class EmbeddingRecipe:
     chunk_target_tokens: int | None = None
     chunk_overlap_tokens: int | None = None
     chunk_max_characters: int | None = None
-    source: str = "fulltext"  # "fulltext" | "abstract"
+    chunk_overlap_characters: int | None = None  # character-based profiles (e.g. by_title)
+    source: str = "fulltext"  # which part of the doc: "fulltext" | "abstract"
+    # which production of the text this was chunked from, so an importer can reject
+    # a file whose source kind does not match the profile it expects (e.g.
+    # "converted_merged_main", "pdfx_merged_markdown"). Distinct from ``source``.
+    source_text_kind: str | None = None
     references_excluded: bool | None = None
     normalizer: str = "agr_abc_document_parsers.strip_markdown_formatting"
     normalizer_version: str = ""
@@ -143,7 +148,9 @@ class EmbeddingRecipe:
             "chunk_target_tokens": self.chunk_target_tokens,
             "chunk_overlap_tokens": self.chunk_overlap_tokens,
             "chunk_max_characters": self.chunk_max_characters,
+            "chunk_overlap_characters": self.chunk_overlap_characters,
             "source": self.source,
+            "source_text_kind": self.source_text_kind,
             "references_excluded": self.references_excluded,
             "normalizer": self.normalizer,
             "normalizer_version": self.normalizer_version or _package_version(),
