@@ -86,6 +86,26 @@ markdown = convert_xml_to_markdown(xml_bytes, source_format="tei")
 markdown = convert_xml_to_markdown(xml_bytes, source_format="jats")
 ```
 
+### Convert TEI with PDF page provenance
+
+GROBID TEI can include `coords` attributes that identify source PDF pages.
+The additive TEI-specific API returns the same canonical ABC Markdown plus
+non-overlapping UTF-8 byte spans. It does not put page markers in Markdown.
+
+```python
+from agr_abc_document_parsers import convert_tei_to_markdown_with_provenance
+
+emission = convert_tei_to_markdown_with_provenance(tei_bytes)
+markdown = emission.markdown
+
+for span in emission.spans:
+    print(span.byte_start, span.byte_end, span.page_numbers, span.native_id, span.kind)
+```
+
+`page_numbers` preserves the ordered, unique positive pages reported by TEI.
+It may be empty when GROBID did not provide coordinates; callers can treat
+those ranges as unresolved without changing the Markdown text.
+
 ### Parse, inspect, and emit
 
 ```python

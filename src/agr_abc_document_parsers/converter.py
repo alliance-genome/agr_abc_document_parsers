@@ -9,7 +9,8 @@ from __future__ import annotations
 from lxml import etree
 
 from agr_abc_document_parsers.jats_parser import parse_jats
-from agr_abc_document_parsers.md_emitter import emit_markdown
+from agr_abc_document_parsers.md_emitter import emit_markdown, emit_markdown_with_provenance
+from agr_abc_document_parsers.models import MarkdownEmission
 from agr_abc_document_parsers.tei_parser import parse_tei
 from agr_abc_document_parsers.xml_utils import parse_xml
 
@@ -72,3 +73,9 @@ def convert_xml_to_markdown(xml_content: bytes, source_format: str = "auto") -> 
         raise ValueError(f"Unknown format: {source_format}")
 
     return emit_markdown(document)
+
+
+def convert_tei_to_markdown_with_provenance(xml_content: bytes) -> MarkdownEmission:
+    """Convert TEI once into canonical Markdown and native-source byte spans."""
+    document = parse_tei(xml_content)
+    return emit_markdown_with_provenance(document)
