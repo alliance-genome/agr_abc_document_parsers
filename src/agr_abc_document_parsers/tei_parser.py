@@ -17,6 +17,7 @@ from agr_abc_document_parsers.models import (
     Paragraph,
     Reference,
     Section,
+    SourceProvenance,
     Table,
     TableCell,
     _collect_figures_to_doc,
@@ -31,6 +32,58 @@ from agr_abc_document_parsers.xml_utils import (
 logger = logging.getLogger(__name__)
 
 NS = {"tei": "http://www.tei-c.org/ns/1.0"}
+XML_ID = "{http://www.w3.org/XML/1998/namespace}id"
+
+
+def _parse_coords(value: str) -> tuple[int, ...]:
+    """Return ordered unique positive page numbers from GROBID coordinates."""
+    pages: list[int] = []
+    seen: set[int] = set()
+    for segment in value.split(";"):
+        page_text, separator, _rest = segment.partition(",")
+        if not separator:
+            continue
+        try:
+            page = int(page_text.strip())
+        except ValueError:
+            continue
+        if page > 0 and page not in seen:
+            seen.add(page)
+            pages.append(page)
+    return tuple(pages)
+
+
+def _source_provenance(elem: etree._Element | None) -> SourceProvenance:
+    """Collect native identity and coordinate pages from an element subtree."""
+    if elem is None:
+        return SourceProvenance()
+    pages: list[int] = []
+    seen: set[int] = set()
+    for descendant in elem.iter():
+        for page in _parse_coords(descendant.get("coords", "")):
+            if page not in seen:
+                seen.add(page)
+                pages.append(page)
+    return SourceProvenance(
+        native_id=elem.get(XML_ID, ""),
+        page_numbers=tuple(pages),
+    )
+
+
+def _combine_provenance(elements: list[etree._Element]) -> SourceProvenance:
+    """Combine provenance from source elements while preserving document order."""
+    pages: list[int] = []
+    seen: set[int] = set()
+    native_id = ""
+    for elem in elements:
+        provenance = _source_provenance(elem)
+        if not native_id:
+            native_id = provenance.native_id
+        for page in provenance.page_numbers:
+            if page not in seen:
+                seen.add(page)
+                pages.append(page)
+    return SourceProvenance(native_id=native_id, page_numbers=tuple(pages))
 
 
 def parse_tei(
@@ -51,7 +104,9 @@ def parse_tei(
         root = parse_xml(xml_content)
     doc = Document(source_format="tei")
 
+    title_elem = root.find(".//tei:teiHeader//tei:title[@level='a']", NS)
     doc.title = _parse_title(root)
+    doc.title_provenance = _source_provenance(title_elem)
     doc.authors = _parse_authors(root)
     doc.abstract = _parse_abstract(root)
     doc.keywords = _parse_keywords(root)
@@ -60,7 +115,7 @@ def parse_tei(
     doc.sections = _parse_body(root)
     doc.figures, doc.tables = _parse_top_level_figures(root)
     doc.references = _parse_bibliography(root)
-    doc.acknowledgments = _parse_acknowledgments(root)
+    doc.acknowledgments, doc.acknowledgments_provenance = _parse_acknowledgments(root)
 
     # Back matter: annex + additional div types (funding, availability)
     back_matter = _parse_annex(root)
@@ -281,6 +336,7 @@ def _parse_section(div_elem: etree._Element, level: int) -> Section:
         section.heading = all_text(head)
         n_attr = head.get("n", "")
         section.number = n_attr
+        section.heading_provenance = _source_provenance(head)
 
     for child in div_elem:
         tag = etree.QName(child.tag).localname if isinstance(child.tag, str) else ""
@@ -421,12 +477,12 @@ def _parse_paragraph(p_elem: etree._Element) -> Paragraph:
     # Collapse XML-indentation whitespace (newlines + spaces) into
     # single spaces so parsed paragraphs read cleanly.
     para_text = re.sub(r"\s+", " ", "".join(parts)).strip()
-    return Paragraph(text=para_text, refs=refs)
+    return Paragraph(text=para_text, refs=refs, provenance=_source_provenance(p_elem))
 
 
 def _parse_figure(fig_elem: etree._Element) -> Figure:
     """Parse a <figure> element (non-table)."""
-    fig = Figure()
+    fig = Figure(provenance=_source_provenance(fig_elem))
 
     head = fig_elem.find("tei:head", NS)
     if head is not None:
@@ -447,7 +503,7 @@ def _parse_figure(fig_elem: etree._Element) -> Figure:
 
 def _parse_table(fig_elem: etree._Element) -> Table:
     """Parse a <figure type='table'> element."""
-    table = Table()
+    table = Table(provenance=_source_provenance(fig_elem))
 
     head = fig_elem.find("tei:head", NS)
     if head is not None:
@@ -519,7 +575,11 @@ def _parse_formula(formula_elem: etree._Element) -> Formula:
     else:
         formula_text = full_text
 
-    return Formula(text=formula_text, label=label_text)
+    return Formula(
+        text=formula_text,
+        label=label_text,
+        provenance=_source_provenance(formula_elem),
+    )
 
 
 def _parse_list(list_elem: etree._Element) -> ListBlock:
@@ -531,21 +591,26 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
         item_text = all_text(item_elem)
         if item_text:
             items.append(item_text)
-    return ListBlock(items=items, ordered=ordered)
+    return ListBlock(
+        items=items,
+        ordered=ordered,
+        provenance=_source_provenance(list_elem),
+    )
 
 
-def _parse_acknowledgments(root: etree._Element) -> str:
+def _parse_acknowledgments(root: etree._Element) -> tuple[str, SourceProvenance]:
     """Extract acknowledgments from //back/div[@type='acknowledgement']."""
     ack_div = root.find(".//tei:back/tei:div[@type='acknowledgement']", NS)
     if ack_div is None:
-        return ""
+        return "", SourceProvenance()
 
     parts: list[str] = []
-    for p_elem in ack_div.findall(".//tei:p", NS):
+    paragraph_elements = ack_div.findall(".//tei:p", NS)
+    for p_elem in paragraph_elements:
         p_text = all_text(p_elem)
         if p_text:
             parts.append(p_text)
-    return "\n\n".join(parts)
+    return "\n\n".join(parts), _combine_provenance(paragraph_elements)
 
 
 def _parse_annex(root: etree._Element) -> list[Section]:
@@ -586,6 +651,7 @@ def _parse_additional_back(root: etree._Element) -> list[Section]:
         head = div.find("tei:head", NS)
         if head is not None:
             section.heading = all_text(head)
+            section.heading_provenance = _source_provenance(head)
         elif div_type:
             # Capitalize the type for a readable heading
             section.heading = div_type.replace("_", " ").title()
@@ -692,7 +758,7 @@ def _parse_bib_editors(
 
 def _parse_bib_entry(bib_elem: etree._Element, index: int) -> Reference:
     """Parse a single <biblStruct> element."""
-    ref = Reference(index=index)
+    ref = Reference(index=index, provenance=_source_provenance(bib_elem))
 
     _parse_bib_authors(bib_elem, ref)
 

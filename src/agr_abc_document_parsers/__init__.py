@@ -5,11 +5,15 @@ format used across all AGR services for scientific publications.
 """
 
 from agr_abc_document_parsers.converter import (  # noqa: F401
+    convert_tei_to_markdown_with_provenance,
     convert_xml_to_markdown,
     detect_format,
 )
 from agr_abc_document_parsers.jats_parser import parse_jats  # noqa: F401
-from agr_abc_document_parsers.md_emitter import emit_markdown  # noqa: F401
+from agr_abc_document_parsers.md_emitter import (  # noqa: F401
+    emit_markdown,
+    emit_markdown_with_provenance,
+)
 from agr_abc_document_parsers.md_reader import (  # noqa: F401
     load_document_with_supplements,
     read_markdown,
@@ -28,10 +32,13 @@ from agr_abc_document_parsers.models import (  # noqa: F401
     FundingEntry,
     InlineRef,
     ListBlock,
+    MarkdownEmission,
+    MarkdownSourceSpan,
     Paragraph,
     Reference,
     SecondaryAbstract,
     Section,
+    SourceProvenance,
     Table,
     TableCell,
 )

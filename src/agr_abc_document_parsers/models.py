@@ -119,11 +119,43 @@ class NamedContent:
     content_type: str = ""
 
 
+@dataclass(frozen=True)
+class SourceProvenance:
+    """Optional native-source identity and ordered PDF page coordinates."""
+
+    native_id: str = ""
+    page_numbers: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class MarkdownSourceSpan:
+    """A TEI-backed, half-open UTF-8 byte interval in emitted Markdown."""
+
+    byte_start: int
+    byte_end: int
+    page_numbers: tuple[int, ...]
+    native_id: str = ""
+    kind: str = ""
+
+
+@dataclass(frozen=True)
+class MarkdownEmission:
+    """Canonical ABC Markdown plus its additive native-source sidecar data."""
+
+    markdown: str
+    spans: tuple[MarkdownSourceSpan, ...] = ()
+
+
 @dataclass
 class Paragraph:
     text: str = ""
     refs: list[InlineRef] = field(default_factory=list)
     named_content: list[NamedContent] = field(default_factory=list)
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -135,6 +167,11 @@ class Figure:
     attrib: str = ""  # attribution / source text from <attrib>
     graphic_url: str = ""  # image ref (preserved for downstream; not in Markdown)
     doi: str = ""  # figure-level DOI (from <object-id pub-id-type="doi">)
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -150,12 +187,22 @@ class Table:
     caption: str = ""
     foot_notes: list[str] = field(default_factory=list)
     rows: list[list[TableCell]] = field(default_factory=list)
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
 class Formula:
     text: str = ""
     label: str = ""
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -163,6 +210,11 @@ class ListBlock:
     items: list[str] = field(default_factory=list)
     ordered: bool = False
     title: str = ""
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -191,6 +243,11 @@ class Section:
     notes: list[str] = field(default_factory=list)
     subsections: list[Section] = field(default_factory=list)
     is_boxed: bool = False  # True when from <boxed-text>
+    heading_provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -216,6 +273,11 @@ class Reference:
     ext_links: list[str] = field(default_factory=list)  # URLs from ext-link/ptr
     comment: str = ""  # free-text annotation (e.g., "In press", "Epub ahead of print")
     edition: str = ""  # book edition
+    provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass
@@ -257,6 +319,16 @@ class Document:
     self_uri: str = ""  # article self-URI (e.g., PDF link)
     trans_titles: list[str] = field(default_factory=list)  # translated titles
     counts: dict[str, int] = field(default_factory=dict)  # page-count, fig-count, etc.
+    title_provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
+    acknowledgments_provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
     # -- Loading methods ---------------------------------------------------
 

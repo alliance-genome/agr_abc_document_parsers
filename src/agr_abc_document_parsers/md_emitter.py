@@ -7,8 +7,11 @@ import re
 from agr_abc_document_parsers.models import (
     Document,
     ListBlock,
+    MarkdownEmission,
+    MarkdownSourceSpan,
     Reference,
     Section,
+    SourceProvenance,
     Table,
 )
 
@@ -25,6 +28,61 @@ _CAPTION_LABEL_RE = re.compile(
 )
 
 
+class _ProvenanceLines(list[str]):
+    """Output lines plus source-backed intervals captured during emission."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.intervals: list[tuple[int, int, SourceProvenance, str]] = []
+
+    def record(self, start: int, provenance: SourceProvenance, kind: str) -> None:
+        if len(self) > start:
+            self.intervals.append((start, len(self), provenance, kind))
+
+    def emission(self) -> MarkdownEmission:
+        markdown = "\n".join(self).rstrip("\n") + "\n"
+        encoded_length = len(markdown.encode("utf-8"))
+        line_starts: list[int] = []
+        offset = 0
+        for line in self:
+            line_starts.append(offset)
+            offset += len(line.encode("utf-8")) + 1
+
+        spans: list[MarkdownSourceSpan] = []
+        for start_line, end_line, provenance, kind in self.intervals:
+            byte_start = min(line_starts[start_line], encoded_length)
+            byte_end = line_starts[end_line] if end_line < len(line_starts) else encoded_length
+            byte_end = min(byte_end, encoded_length)
+            if byte_end > byte_start:
+                spans.append(
+                    MarkdownSourceSpan(
+                        byte_start=byte_start,
+                        byte_end=byte_end,
+                        page_numbers=provenance.page_numbers,
+                        native_id=provenance.native_id,
+                        kind=kind,
+                    )
+                )
+        return MarkdownEmission(markdown=markdown, spans=tuple(spans))
+
+
+def _record(
+    lines: list[str],
+    start: int,
+    provenance: SourceProvenance,
+    kind: str,
+) -> None:
+    if isinstance(lines, _ProvenanceLines):
+        lines.record(start, provenance, kind)
+
+
+def emit_markdown_with_provenance(doc: Document) -> MarkdownEmission:
+    """Emit canonical Markdown and source intervals in the same render pass."""
+    lines = _ProvenanceLines()
+    _emit_document(doc, lines)
+    return lines.emission()
+
+
 def emit_markdown(doc: Document) -> str:
     """Convert a Document model to a Markdown string.
 
@@ -35,6 +93,12 @@ def emit_markdown(doc: Document) -> str:
         A docling-style Markdown string.
     """
     lines: list[str] = []
+    _emit_document(doc, lines)
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _emit_document(doc: Document, lines: list[str]) -> None:
+    """Populate *lines* using the single canonical ABC Markdown renderer."""
 
     _emit_title(doc, lines)
     _emit_metadata(doc, lines)
@@ -57,14 +121,14 @@ def emit_markdown(doc: Document) -> str:
     _emit_secondary_abstracts(doc, lines)
     _emit_sub_articles(doc, lines)
 
-    return "\n".join(lines).rstrip("\n") + "\n"
-
 
 def _emit_title(doc: Document, lines: list[str]) -> None:
     if not doc.title:
         return
+    start = len(lines)
     lines.append(f"# {doc.title}")
     lines.append("")
+    _record(lines, start, doc.title_provenance, "title")
     for tt in doc.trans_titles:
         lines.append(f"*{tt}*")
         lines.append("")
@@ -172,8 +236,10 @@ def _emit_abstract(doc: Document, lines: list[str]) -> None:
     lines.append("## Abstract")
     lines.append("")
     for para in doc.abstract:
+        start = len(lines)
         lines.append(para.text)
         lines.append("")
+        _record(lines, start, para.provenance, "abstract_paragraph")
 
 
 def _emit_keywords(doc: Document, lines: list[str]) -> None:
@@ -225,29 +291,39 @@ def _emit_section(
 
     # Heading (section numbers omitted to match consensus pipeline format)
     if section.heading:
+        start = len(lines)
         lines.append(f"{hashes} {section.heading}")
         lines.append("")
+        _record(lines, start, section.heading_provenance, "section_heading")
 
     # Paragraphs (para.refs preserved in the Document model for downstream use)
     for para in section.paragraphs:
+        start = len(lines)
         lines.append(para.text)
         lines.append("")
+        _record(lines, start, para.provenance, "paragraph")
 
     # Tables
     for table in section.tables:
+        start = len(lines)
         _emit_table(table, lines)
+        _record(lines, start, table.provenance, "table")
 
     # Formulas
     for formula in section.formulas:
+        start = len(lines)
         if formula.label:
             lines.append(f"{formula.label} {formula.text}")
         else:
             lines.append(formula.text)
         lines.append("")
+        _record(lines, start, formula.provenance, "formula")
 
     # Lists
     for lst in section.lists:
+        start = len(lines)
         _emit_list(lst, lines)
+        _record(lines, start, lst.provenance, "list")
 
     # Footnotes
     for note in section.notes:
@@ -380,6 +456,7 @@ def _emit_figure_legends(doc: Document, lines: list[str]) -> None:
     lines.append("## Figure Legends")
     lines.append("")
     for fig in doc.figures:
+        start = len(lines)
         label = fig.label.rstrip(".:").strip()
         caption = fig.caption
         # When label is empty but caption contains a bold figure label
@@ -409,12 +486,15 @@ def _emit_figure_legends(doc: Document, lines: list[str]) -> None:
         if fig.attrib:
             lines.append(fig.attrib)
             lines.append("")
+        _record(lines, start, fig.provenance, "figure")
 
 
 def _emit_doc_level_tables(doc: Document, lines: list[str]) -> None:
     """Emit tables that are at document level (not inside sections)."""
     for table in doc.tables:
+        start = len(lines)
         _emit_table(table, lines)
+        _record(lines, start, table.provenance, "table")
 
 
 def _emit_acknowledgments(doc: Document, lines: list[str]) -> None:
@@ -424,6 +504,7 @@ def _emit_acknowledgments(doc: Document, lines: list[str]) -> None:
     lines.append("")
     lines.append(doc.acknowledgments)
     lines.append("")
+    _record(lines, len(lines) - 2, doc.acknowledgments_provenance, "acknowledgments")
 
 
 def _emit_funding(doc: Document, lines: list[str]) -> None:
@@ -497,8 +578,10 @@ def _emit_back_matter(
     _emit_sections(headed, lines, base_level=2, footnote_counter=footnote_counter)
     for section in headingless:
         for para in section.paragraphs:
+            start = len(lines)
             footnote_counter[0] += 1
             lines.append(f"[^{footnote_counter[0]}]: {para.text}")
+            _record(lines, start, para.provenance, "paragraph")
         for note in section.notes:
             footnote_counter[0] += 1
             lines.append(f"[^{footnote_counter[0]}]: {note}")
@@ -510,7 +593,9 @@ def _emit_back_matter(
             lines.append("")
         # Tables in headingless sections
         for table in section.tables:
+            start = len(lines)
             _emit_table(table, lines)
+            _record(lines, start, table.provenance, "table")
         # Emit headed subsections (e.g. appendix sections)
         headed_subs = [s for s in section.subsections if s.heading]
         if headed_subs:
@@ -576,7 +661,9 @@ def _emit_references(doc: Document, lines: list[str]) -> None:
     lines.append("## References")
     lines.append("")
     for ref in doc.references:
+        start = len(lines)
         lines.append(_format_ref_line(ref))
+        _record(lines, start, ref.provenance, "reference")
     lines.append("")
 
 
@@ -594,8 +681,10 @@ def _emit_secondary_abstracts(doc: Document, lines: list[str]) -> None:
         lines.append(f"## {sa.label}")
         lines.append("")
         for para in sa.paragraphs:
+            start = len(lines)
             lines.append(para.text)
             lines.append("")
+            _record(lines, start, para.provenance, "secondary_abstract_paragraph")
 
 
 def _emit_author_roles(doc: Document, lines: list[str]) -> None:
@@ -685,8 +774,10 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
         lines.append("")
     if sub.abstract:
         for para in sub.abstract:
+            start = len(lines)
             lines.append(para.text)
             lines.append("")
+            _record(lines, start, para.provenance, "abstract_paragraph")
     footnote_counter = [0]
     _emit_sections(sub.sections, lines, base_level=3, footnote_counter=footnote_counter)
     # Sub-article back-matter (fn-groups, notes, etc.)
@@ -705,8 +796,10 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
         for section in sub.back_matter:
             if not section.heading:
                 for para in section.paragraphs:
+                    start = len(lines)
                     footnote_counter[0] += 1
                     lines.append(f"[^{footnote_counter[0]}]: {para.text}")
+                    _record(lines, start, para.provenance, "paragraph")
                 for note in section.notes:
                     footnote_counter[0] += 1
                     lines.append(f"[^{footnote_counter[0]}]: {note}")
@@ -716,5 +809,7 @@ def _emit_sub_article(sub: Document, lines: list[str]) -> None:
         lines.append("### References")
         lines.append("")
         for ref in sub.references:
+            start = len(lines)
             lines.append(_format_ref_line(ref))
+            _record(lines, start, ref.provenance, "reference")
         lines.append("")
