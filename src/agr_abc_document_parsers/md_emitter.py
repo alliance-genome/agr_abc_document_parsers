@@ -28,7 +28,7 @@ _CAPTION_LABEL_RE = re.compile(
 )
 
 
-class _ProvenanceLines(list[str]):
+class _ProvenanceLines(list):
     """Output lines plus source-backed intervals captured during emission."""
 
     def __init__(self) -> None:
