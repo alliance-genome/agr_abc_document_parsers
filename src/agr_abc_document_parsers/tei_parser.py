@@ -115,7 +115,11 @@ def parse_tei(
     doc.sections = _parse_body(root)
     doc.figures, doc.tables = _parse_top_level_figures(root)
     doc.references = _parse_bibliography(root)
-    doc.acknowledgments, doc.acknowledgments_provenance = _parse_acknowledgments(root)
+    (
+        doc.acknowledgments,
+        doc.acknowledgments_provenance,
+        doc.acknowledgments_heading_provenance,
+    ) = _parse_acknowledgments(root)
 
     # Back matter: annex + additional div types (funding, availability)
     back_matter = _parse_annex(root)
@@ -598,11 +602,13 @@ def _parse_list(list_elem: etree._Element) -> ListBlock:
     )
 
 
-def _parse_acknowledgments(root: etree._Element) -> tuple[str, SourceProvenance]:
+def _parse_acknowledgments(
+    root: etree._Element,
+) -> tuple[str, SourceProvenance, SourceProvenance]:
     """Extract acknowledgments from //back/div[@type='acknowledgement']."""
     ack_div = root.find(".//tei:back/tei:div[@type='acknowledgement']", NS)
     if ack_div is None:
-        return "", SourceProvenance()
+        return "", SourceProvenance(), SourceProvenance()
 
     parts: list[str] = []
     paragraph_elements = ack_div.findall(".//tei:p", NS)
@@ -610,7 +616,12 @@ def _parse_acknowledgments(root: etree._Element) -> tuple[str, SourceProvenance]
         p_text = all_text(p_elem)
         if p_text:
             parts.append(p_text)
-    return "\n\n".join(parts), _combine_provenance(paragraph_elements)
+    content_provenance = _combine_provenance(paragraph_elements)
+    head = ack_div.find(".//tei:head", NS)
+    heading_provenance = _source_provenance(head)
+    if not heading_provenance.page_numbers:
+        heading_provenance = content_provenance
+    return "\n\n".join(parts), content_provenance, heading_provenance
 
 
 def _parse_annex(root: etree._Element) -> list[Section]:
@@ -655,6 +666,7 @@ def _parse_additional_back(root: etree._Element) -> list[Section]:
         elif div_type:
             # Capitalize the type for a readable heading
             section.heading = div_type.replace("_", " ").title()
+            section.heading_provenance = _source_provenance(div)
 
         # Parse content — may have nested divs
         for child in div:

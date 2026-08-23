@@ -48,7 +48,10 @@ PROVENANCE_TEI = b"""\
     </body>
     <back>
       <div type="acknowledgement">
-        <p xml:id="ack-1" coords="6,10,10,50,10">Thanks to everyone.</p>
+        <div>
+          <head xml:id="ack-head" coords="6,10,5,50,10">Acknowledgments</head>
+          <p xml:id="ack-1" coords="6,10,10,50,10">Thanks to everyone.</p>
+        </div>
       </div>
       <div type="references"><listBibl>
         <biblStruct xml:id="b0" coords="7,10,10,50,10">
@@ -100,6 +103,7 @@ def test_tei_provenance_covers_supported_native_structures() -> None:
         "list-1": ("list", (3,), "- First item"),
         "figure-1": ("figure", (4,), "### Figure 1"),
         "table-1": ("table", (5,), "| Column |"),
+        "ack-head": ("acknowledgments_heading", (6,), "## Acknowledgments"),
         "ack-1": ("acknowledgments", (6,), "Thanks to everyone."),
         "b0": ("reference", (7,), "1. (2024) A cited paper."),
     }
@@ -139,6 +143,42 @@ def test_figure_heading_ignores_a_first_figure_that_emits_no_entry() -> None:
     assert heading.page_numbers == (4,)
     assert _span_text(emission.markdown, heading.byte_start, heading.byte_end) == (
         "## Figure Legends\n\n"
+    )
+
+
+def test_synthetic_back_heading_inherits_first_emitted_child_page() -> None:
+    xml = PROVENANCE_TEI.replace(
+        b'<div type="references"><listBibl>',
+        b'<div type="funding"><div>'
+        b'<head xml:id="funding-head" coords="8,10,10,50,10">Funding details</head>'
+        b'<p xml:id="funding-text" coords="8,10,30,50,10">Supported by AGR.</p>'
+        b'</div></div><div type="references"><listBibl>',
+    )
+
+    emission = convert_tei_to_markdown_with_provenance(xml)
+    generated = next(
+        item
+        for item in emission.spans
+        if _span_text(emission.markdown, item.byte_start, item.byte_end) == "## Funding\n\n"
+    )
+
+    assert generated.page_numbers == (8,)
+    assert generated.kind == "section_heading"
+
+
+def test_acknowledgments_heading_falls_back_to_content_page() -> None:
+    xml = PROVENANCE_TEI.replace(
+        b'<head xml:id="ack-head" coords="6,10,5,50,10">Acknowledgments</head>',
+        b"",
+    )
+
+    emission = convert_tei_to_markdown_with_provenance(xml)
+    heading = next(item for item in emission.spans if item.kind == "acknowledgments_heading")
+
+    assert heading.native_id == "ack-1"
+    assert heading.page_numbers == (6,)
+    assert _span_text(emission.markdown, heading.byte_start, heading.byte_end) == (
+        "## Acknowledgments\n\n"
     )
 
 
