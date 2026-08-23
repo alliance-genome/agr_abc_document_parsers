@@ -112,6 +112,36 @@ def test_tei_provenance_covers_supported_native_structures() -> None:
         assert text_fragment in _span_text(emission.markdown, span.byte_start, span.byte_end)
 
 
+def test_generated_figure_and_reference_headings_inherit_first_entry_page() -> None:
+    emission = convert_tei_to_markdown_with_provenance(PROVENANCE_TEI)
+
+    expected = {
+        "figure_heading": ((4,), "## Figure Legends\n\n"),
+        "reference_heading": ((7,), "## References\n\n"),
+    }
+    for kind, (pages, text) in expected.items():
+        span = next(item for item in emission.spans if item.kind == kind)
+        assert span.page_numbers == pages
+        assert _span_text(emission.markdown, span.byte_start, span.byte_end) == text
+
+
+def test_figure_heading_ignores_a_first_figure_that_emits_no_entry() -> None:
+    xml = PROVENANCE_TEI.replace(
+        b'<figure xml:id="figure-1" coords="4,10,10,50,10">',
+        b'<figure xml:id="empty-figure" coords="2,10,10,50,10"><graphic/></figure>'
+        b'<figure xml:id="figure-1" coords="4,10,10,50,10">',
+    ).replace(b"<head>Figure 1.</head>", b"")
+
+    emission = convert_tei_to_markdown_with_provenance(xml)
+    heading = next(item for item in emission.spans if item.kind == "figure_heading")
+
+    assert heading.native_id == "figure-1"
+    assert heading.page_numbers == (4,)
+    assert _span_text(emission.markdown, heading.byte_start, heading.byte_end) == (
+        "## Figure Legends\n\n"
+    )
+
+
 def test_invalid_coordinate_segments_are_ignored_without_reordering_pages() -> None:
     xml = PROVENANCE_TEI.replace(
         b'coords="2,10,30,50,10;3,10,10,50,10;2,1,1,1,1"',

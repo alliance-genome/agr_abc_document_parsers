@@ -6,6 +6,7 @@ import re
 
 from agr_abc_document_parsers.models import (
     Document,
+    Figure,
     ListBlock,
     MarkdownEmission,
     MarkdownSourceSpan,
@@ -449,12 +450,31 @@ def _emit_list(lst: ListBlock, lines: list[str]) -> None:
     lines.append("")
 
 
+def _figure_emits_content(figure: Figure) -> bool:
+    """Return whether the existing figure renderer emits an entry."""
+
+    label = figure.label.rstrip(".:").strip()
+    return bool(label or figure.caption or figure.alt_text or figure.attrib)
+
+
 def _emit_figure_legends(doc: Document, lines: list[str]) -> None:
     """Emit all figures in a dedicated '## Figure Legends' section."""
     if not doc.figures:
         return
+    first_emitted_figure = next(
+        (figure for figure in doc.figures if _figure_emits_content(figure)),
+        None,
+    )
+    heading_start = len(lines)
     lines.append("## Figure Legends")
     lines.append("")
+    if first_emitted_figure is not None:
+        _record(
+            lines,
+            heading_start,
+            first_emitted_figure.provenance,
+            "figure_heading",
+        )
     for fig in doc.figures:
         start = len(lines)
         label = fig.label.rstrip(".:").strip()
@@ -466,7 +486,7 @@ def _emit_figure_legends(doc: Document, lines: list[str]) -> None:
             if m:
                 label = m.group(1).rstrip(".:").strip()
                 caption = m.group(2).strip()
-        if not label and not caption and not fig.alt_text and not fig.attrib:
+        if not _figure_emits_content(fig):
             continue
         if label:
             lines.append(f"### {label}")
@@ -658,8 +678,10 @@ def _format_ref_line(ref: Reference) -> str:
 def _emit_references(doc: Document, lines: list[str]) -> None:
     if not doc.references:
         return
+    heading_start = len(lines)
     lines.append("## References")
     lines.append("")
+    _record(lines, heading_start, doc.references[0].provenance, "reference_heading")
     for ref in doc.references:
         start = len(lines)
         lines.append(_format_ref_line(ref))
