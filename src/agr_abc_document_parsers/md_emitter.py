@@ -520,11 +520,24 @@ def _emit_doc_level_tables(doc: Document, lines: list[str]) -> None:
 def _emit_acknowledgments(doc: Document, lines: list[str]) -> None:
     if not doc.acknowledgments:
         return
+    heading_start = len(lines)
     lines.append("## Acknowledgments")
     lines.append("")
+    _record(
+        lines,
+        heading_start,
+        (
+            # Preserve provenance for callers populating only the pre-1.7.2 content field.
+            doc.acknowledgments_heading_provenance
+            if doc.acknowledgments_heading_provenance.page_numbers
+            else doc.acknowledgments_provenance
+        ),
+        "acknowledgments_heading",
+    )
+    content_start = len(lines)
     lines.append(doc.acknowledgments)
     lines.append("")
-    _record(lines, len(lines) - 2, doc.acknowledgments_provenance, "acknowledgments")
+    _record(lines, content_start, doc.acknowledgments_provenance, "acknowledgments")
 
 
 def _emit_funding(doc: Document, lines: list[str]) -> None:

@@ -329,6 +329,11 @@ class Document:
         compare=False,
         repr=False,
     )
+    acknowledgments_heading_provenance: SourceProvenance = field(
+        default_factory=SourceProvenance,
+        compare=False,
+        repr=False,
+    )
 
     # -- Loading methods ---------------------------------------------------
 
