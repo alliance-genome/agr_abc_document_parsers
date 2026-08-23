@@ -527,6 +527,7 @@ def _emit_acknowledgments(doc: Document, lines: list[str]) -> None:
         lines,
         heading_start,
         (
+            # Preserve provenance for callers populating only the pre-1.7.2 content field.
             doc.acknowledgments_heading_provenance
             if doc.acknowledgments_heading_provenance.page_numbers
             else doc.acknowledgments_provenance

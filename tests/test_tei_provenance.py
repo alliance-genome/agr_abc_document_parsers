@@ -1,8 +1,11 @@
 """Contract tests for additive TEI-to-Markdown page provenance."""
 
 from agr_abc_document_parsers import (
+    Document,
+    SourceProvenance,
     convert_tei_to_markdown_with_provenance,
     convert_xml_to_markdown,
+    emit_markdown_with_provenance,
     read_markdown,
     validate_markdown,
 )
@@ -146,12 +149,12 @@ def test_figure_heading_ignores_a_first_figure_that_emits_no_entry() -> None:
     )
 
 
-def test_synthetic_back_heading_inherits_first_emitted_child_page() -> None:
+def test_synthetic_back_heading_uses_descendant_native_head_page() -> None:
     xml = PROVENANCE_TEI.replace(
         b'<div type="references"><listBibl>',
         b'<div type="funding"><div>'
         b'<head xml:id="funding-head" coords="8,10,10,50,10">Funding details</head>'
-        b'<p xml:id="funding-text" coords="8,10,30,50,10">Supported by AGR.</p>'
+        b'<p xml:id="funding-text" coords="9,10,30,50,10">Supported by AGR.</p>'
         b'</div></div><div type="references"><listBibl>',
     )
 
@@ -163,6 +166,7 @@ def test_synthetic_back_heading_inherits_first_emitted_child_page() -> None:
     )
 
     assert generated.page_numbers == (8,)
+    assert generated.native_id == "funding-head"
     assert generated.kind == "section_heading"
 
 
@@ -176,6 +180,25 @@ def test_acknowledgments_heading_falls_back_to_content_page() -> None:
     heading = next(item for item in emission.spans if item.kind == "acknowledgments_heading")
 
     assert heading.native_id == "ack-1"
+    assert heading.page_numbers == (6,)
+    assert _span_text(emission.markdown, heading.byte_start, heading.byte_end) == (
+        "## Acknowledgments\n\n"
+    )
+
+
+def test_acknowledgments_emitter_preserves_pre_heading_field_provenance() -> None:
+    emission = emit_markdown_with_provenance(
+        Document(
+            acknowledgments="Thanks to everyone.",
+            acknowledgments_provenance=SourceProvenance(
+                native_id="legacy-ack",
+                page_numbers=(6,),
+            ),
+        )
+    )
+    heading = next(item for item in emission.spans if item.kind == "acknowledgments_heading")
+
+    assert heading.native_id == "legacy-ack"
     assert heading.page_numbers == (6,)
     assert _span_text(emission.markdown, heading.byte_start, heading.byte_end) == (
         "## Acknowledgments\n\n"

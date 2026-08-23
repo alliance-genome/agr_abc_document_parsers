@@ -666,7 +666,10 @@ def _parse_additional_back(root: etree._Element) -> list[Section]:
         elif div_type:
             # Capitalize the type for a readable heading
             section.heading = div_type.replace("_", " ").title()
-            section.heading_provenance = _source_provenance(div)
+            heading_provenance = _source_provenance(div.find(".//tei:head", NS))
+            section.heading_provenance = (
+                heading_provenance if heading_provenance.page_numbers else _source_provenance(div)
+            )
 
         # Parse content — may have nested divs
         for child in div:
