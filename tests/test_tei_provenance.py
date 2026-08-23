@@ -6,6 +6,7 @@ from agr_abc_document_parsers import (
     convert_tei_to_markdown_with_provenance,
     convert_xml_to_markdown,
     emit_markdown_with_provenance,
+    parse_tei,
     read_markdown,
     validate_markdown,
 )
@@ -170,11 +171,34 @@ def test_synthetic_back_heading_uses_descendant_native_head_page() -> None:
     assert generated.kind == "section_heading"
 
 
+def test_synthetic_back_heading_falls_back_to_descendant_content_page() -> None:
+    xml = PROVENANCE_TEI.replace(
+        b'<div type="references"><listBibl>',
+        b'<div type="funding"><div>'
+        b'<p xml:id="funding-text" coords="9,10,30,50,10">Supported by AGR.</p>'
+        b'</div></div><div type="references"><listBibl>',
+    )
+
+    emission = convert_tei_to_markdown_with_provenance(xml)
+    generated = next(
+        item
+        for item in emission.spans
+        if _span_text(emission.markdown, item.byte_start, item.byte_end) == "## Funding\n\n"
+    )
+
+    assert generated.page_numbers == (9,)
+    assert generated.kind == "section_heading"
+
+
 def test_acknowledgments_heading_falls_back_to_content_page() -> None:
     xml = PROVENANCE_TEI.replace(
         b'<head xml:id="ack-head" coords="6,10,5,50,10">Acknowledgments</head>',
         b"",
     )
+
+    document = parse_tei(xml)
+    assert document.acknowledgments_heading_provenance.native_id == "ack-1"
+    assert document.acknowledgments_heading_provenance.page_numbers == (6,)
 
     emission = convert_tei_to_markdown_with_provenance(xml)
     heading = next(item for item in emission.spans if item.kind == "acknowledgments_heading")
