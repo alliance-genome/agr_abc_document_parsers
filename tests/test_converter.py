@@ -186,3 +186,115 @@ class TestRealTeiConversion:
         assert "##" in md
         # Has references
         assert "## References" in md
+
+
+# ---------------------------------------------------------------------------
+# Office Open XML (.xlsx / .docx) entry points
+# ---------------------------------------------------------------------------
+
+from agr_abc_document_parsers.converter import (  # noqa: E402
+    convert_office_to_markdown,
+    detect_office_format,
+    office_display_name,
+    parse_office,
+)
+from agr_abc_document_parsers.md_validator import validate_markdown  # noqa: E402
+
+from .ooxml_helpers import build_docx, build_xlsx, p, zip_bytes  # noqa: E402
+
+XLSX_FIXTURE = FIXTURES_DIR / "supplement_tables.xlsx"
+DOCX_FIXTURE = FIXTURES_DIR / "supplement_methods.docx"
+
+
+class TestDetectOfficeFormat:
+    def test_detect_xlsx_and_docx(self):
+        assert detect_office_format(build_xlsx({"S": ""})) == "xlsx"
+        assert detect_office_format(build_docx(p("x"))) == "docx"
+
+    def test_detect_format_routes_zip_packages(self):
+        assert detect_format(XLSX_FIXTURE.read_bytes()) == "xlsx"
+        assert detect_format(DOCX_FIXTURE.read_bytes()) == "docx"
+        assert detect_format(gzip.compress(XLSX_FIXTURE.read_bytes())) == "xlsx"
+
+    def test_detect_format_still_handles_xml(self):
+        assert detect_format(MINIMAL_TEI) == "tei"
+        assert detect_format(MINIMAL_JATS) == "jats"
+
+    def test_unknown_zip_raises(self):
+        with pytest.raises(ValueError, match="neither"):
+            detect_office_format(zip_bytes({"readme.txt": "hi"}))
+
+    def test_non_zip_raises(self):
+        with pytest.raises(ValueError, match="invalid ZIP"):
+            detect_office_format(MINIMAL_TEI)
+
+
+class TestOfficeDisplayName:
+    @pytest.mark.parametrize(
+        "filename, expected",
+        [
+            ("Table_S1.xlsx", "Table_S1"),
+            ("s3/bucket/Table S1.XLSX.gz", "Table S1"),
+            ("Supplementary Methods.docx", "Supplementary Methods"),
+            ("macros.xlsm", "macros"),
+            ("notes.docm", "notes"),
+            ("C:\\files\\Data.docx", "Data"),
+            ("noext", "noext"),
+            ("archive.gz", "archive"),
+        ],
+    )
+    def test_display_names(self, filename, expected):
+        assert office_display_name(filename) == expected
+
+
+class TestConvertOfficeToMarkdown:
+    def test_xlsx_auto_with_filename_title(self):
+        md = convert_office_to_markdown(XLSX_FIXTURE.read_bytes(), filename="Table_S1.xlsx.gz")
+        assert md.startswith("# Table_S1\n\n## Table S1\n\n| Gene |")
+        assert validate_markdown(md).valid
+
+    def test_docx_explicit_title_and_format(self):
+        md = convert_office_to_markdown(
+            DOCX_FIXTURE.read_bytes(), source_format="docx", title="Supplementary Methods"
+        )
+        assert md.startswith("# Supplementary Methods\n\n")
+        assert "## Strains and culture" in md
+        result = validate_markdown(md)
+        assert result.valid and not result.warnings
+
+    def test_title_beats_filename(self):
+        md = convert_office_to_markdown(
+            build_xlsx({"S": "<row><c><v>1</v></c></row>"}), title="Given", filename="File.xlsx"
+        )
+        assert md.startswith("# Given\n")
+
+    def test_gzipped_input(self):
+        md = convert_office_to_markdown(gzip.compress(DOCX_FIXTURE.read_bytes()))
+        assert md.startswith("# Supplementary Methods for Gene Study\n")
+
+    def test_wrong_explicit_format_raises(self):
+        with pytest.raises(ValueError, match="Not an Excel workbook"):
+            convert_office_to_markdown(DOCX_FIXTURE.read_bytes(), source_format="xlsx")
+        with pytest.raises(ValueError, match="Unknown format"):
+            convert_office_to_markdown(DOCX_FIXTURE.read_bytes(), source_format="tei")
+
+    def test_xml_input_raises(self):
+        with pytest.raises(ValueError):
+            convert_office_to_markdown(MINIMAL_JATS)
+
+    def test_parse_office_returns_document(self):
+        doc = parse_office(XLSX_FIXTURE.read_bytes(), title="T")
+        assert doc.source_format == "xlsx"
+        assert doc.title == "T"
+        assert [s.heading for s in doc.sections] == ["Table S1", "Notes"]
+
+
+class TestConvertXmlToMarkdownOfficeRouting:
+    def test_auto_detects_office_package(self):
+        md = convert_xml_to_markdown(XLSX_FIXTURE.read_bytes())
+        assert "## Table S1" in md
+        assert "| Gene |" in md
+
+    def test_explicit_office_format(self):
+        md = convert_xml_to_markdown(DOCX_FIXTURE.read_bytes(), source_format="docx")
+        assert "## Strains and culture" in md

@@ -5,10 +5,14 @@ format used across all AGR services for scientific publications.
 """
 
 from agr_abc_document_parsers.converter import (  # noqa: F401
+    convert_office_to_markdown,
     convert_tei_to_markdown_with_provenance,
     convert_xml_to_markdown,
     detect_format,
+    detect_office_format,
+    parse_office,
 )
+from agr_abc_document_parsers.docx_parser import parse_docx  # noqa: F401
 from agr_abc_document_parsers.jats_parser import parse_jats  # noqa: F401
 from agr_abc_document_parsers.md_emitter import (  # noqa: F401
     emit_markdown,
@@ -49,3 +53,4 @@ from agr_abc_document_parsers.plain_text import (  # noqa: F401
     strip_markdown_formatting,
 )
 from agr_abc_document_parsers.tei_parser import parse_tei  # noqa: F401
+from agr_abc_document_parsers.xlsx_parser import parse_xlsx  # noqa: F401

@@ -9,11 +9,12 @@ from typing import Literal, Union
 
 # Type alias: accepted input for loading methods.
 #   str  -> Markdown text
-#   bytes -> XML (TEI or JATS), optionally gzip-compressed
+#   bytes -> XML (TEI or JATS) or an Office file (.xlsx / .docx),
+#            optionally gzip-compressed
 DocumentInput = Union[str, bytes]
 
 # Accepted values for the ``format`` parameter.
-Format = Literal["auto", "tei", "jats", "markdown"]
+Format = Literal["auto", "tei", "jats", "markdown", "xlsx", "docx"]
 
 # ---------------------------------------------------------------------------
 # Figure anchor ID generation
@@ -341,6 +342,7 @@ class Document:
         self,
         data: DocumentInput,
         format: Format = "auto",
+        title: str = "",
     ) -> Document:
         """Parse *data* and overwrite all main-document fields.
 
@@ -351,16 +353,24 @@ class Document:
             data: The document to load.
 
                 * ``str`` — treated as ABC-format Markdown text.
-                * ``bytes`` — treated as XML (TEI or JATS).  Gzip-compressed
-                  bytes are decompressed automatically.
+                * ``bytes`` — treated as XML (TEI or JATS) or as an Office
+                  file (``.xlsx`` / ``.docx``).  Gzip-compressed bytes are
+                  decompressed automatically.
 
             format: Parser selection.
 
                 * ``"auto"`` (default) — ``str`` → Markdown parser;
-                  ``bytes`` → detect TEI vs JATS from the XML root element.
+                  ``bytes`` → ZIP packages are sniffed for Excel/Word,
+                  otherwise TEI vs JATS is detected from the XML root.
                 * ``"tei"`` — GROBID TEI XML parser (requires ``bytes``).
                 * ``"jats"`` — PMC nXML / JATS parser (requires ``bytes``).
+                * ``"xlsx"`` — Excel workbook parser (requires ``bytes``).
+                * ``"docx"`` — Word document parser (requires ``bytes``).
                 * ``"markdown"`` — ABC Markdown parser (requires ``str``).
+
+            title: Document title for Office inputs, which carry no
+                reliable title of their own (typically the supplement's
+                display name).  Ignored for XML and Markdown inputs.
 
         Returns:
             ``self``, for method chaining.
@@ -371,7 +381,7 @@ class Document:
             doc.load_main(open("paper.nxml.gz", "rb").read())
             doc.load_main(open("paper.md").read(), format="markdown")
         """
-        parsed = _parse_content(data, format)
+        parsed = _parse_content(data, format, title=title)
         old_supplements = self.supplements
         for fld in self.__dataclass_fields__:
             setattr(self, fld, getattr(parsed, fld))
@@ -383,6 +393,7 @@ class Document:
         self,
         data: DocumentInput,
         format: Format = "auto",
+        title: str = "",
     ) -> Document:
         """Parse *data* as a supplement and append to :attr:`supplements`.
 
@@ -390,9 +401,11 @@ class Document:
             data: Supplement content.
 
                 * ``str`` — ABC-format Markdown text.
-                * ``bytes`` — XML (TEI or JATS), optionally gzip-compressed.
+                * ``bytes`` — XML (TEI or JATS) or an Office file
+                  (``.xlsx`` / ``.docx``), optionally gzip-compressed.
 
             format: Parser selection (same options as :meth:`load_main`).
+            title: Title for Office inputs (the supplement's display name).
 
         Returns:
             ``self``, for method chaining.
@@ -401,8 +414,9 @@ class Document:
 
             doc.add_supplement(open("supp1.nxml.gz", "rb").read())
             doc.add_supplement(open("supp2.md").read())
+            doc.add_supplement(open("Table_S1.xlsx", "rb").read(), title="Table S1")
         """
-        self.supplements.append(_parse_content(data, format))
+        self.supplements.append(_parse_content(data, format, title=title))
         return self
 
     def add_supplements(
@@ -414,7 +428,8 @@ class Document:
 
         Args:
             items: List of supplement contents.  Each element is either
-                a ``str`` (Markdown) or ``bytes`` (XML, optionally gzipped).
+                a ``str`` (Markdown) or ``bytes`` (XML or Office file,
+                optionally gzipped).
             format: Parser selection, applied to every item.
                 ``"auto"`` detects format per item.
 
@@ -438,6 +453,7 @@ class Document:
         self,
         path: str | Path,
         format: Format = "auto",
+        title: str = "",
     ) -> Document:
         """Read a file from disk and load it as the main document.
 
@@ -446,12 +462,16 @@ class Document:
 
         * ``.tei``, ``.tei.gz`` → TEI parser
         * ``.nxml``, ``.nxml.gz``, ``.xml``, ``.xml.gz`` → JATS parser
+        * ``.xlsx``, ``.xlsm`` (``.gz`` ok) → Excel parser
+        * ``.docx``, ``.docm`` (``.gz`` ok) → Word parser
         * ``.md`` → Markdown parser
-        * ``.gz`` (other) → auto-detect from XML root element
+        * ``.gz`` (other) → auto-detect from the content
 
         Args:
             path: Path to the file (str or ``pathlib.Path``).
             format: Parser override.  ``"auto"`` detects from extension.
+            title: Title for Office files.  Defaults to the file name
+                without its extension (``Table_S1.xlsx`` → ``Table_S1``).
 
         Returns:
             ``self``, for method chaining.
@@ -462,13 +482,14 @@ class Document:
             doc.load_main_file("paper.nxml.gz")
             doc.load_main_file("/data/papers/12345.md")
         """
-        data, resolved_format = _read_file(path, format)
-        return self.load_main(data, format=resolved_format)
+        data, resolved_format, title = _read_file(path, format, title)
+        return self.load_main(data, format=resolved_format, title=title)
 
     def add_supplement_file(
         self,
         path: str | Path,
         format: Format = "auto",
+        title: str = "",
     ) -> Document:
         """Read a file from disk and append it as a supplement.
 
@@ -477,12 +498,13 @@ class Document:
         Args:
             path: Path to the supplement file.
             format: Parser override.
+            title: Title for Office files (defaults to the file name stem).
 
         Returns:
             ``self``, for method chaining.
         """
-        data, resolved_format = _read_file(path, format)
-        return self.add_supplement(data, format=resolved_format)
+        data, resolved_format, title = _read_file(path, format, title)
+        return self.add_supplement(data, format=resolved_format, title=title)
 
     def add_supplement_files(
         self,
@@ -518,16 +540,22 @@ _EXT_FORMAT_MAP: dict[str, Format] = {
     ".nxml": "jats",
     ".xml": "jats",
     ".md": "markdown",
+    ".xlsx": "xlsx",
+    ".xlsm": "xlsx",
+    ".docx": "docx",
+    ".docm": "docx",
 }
+
+_OFFICE_FORMATS = ("xlsx", "docx")
 
 
 def _resolve_format_from_path(path: Path) -> Format:
     """Guess the parser format from a file's extension."""
     suffixes = path.suffixes  # e.g. ['.tei', '.gz'] or ['.nxml'] or ['.md']
     # Strip trailing .gz
-    exts = [s for s in suffixes if s != ".gz"]
+    exts = [s for s in suffixes if s.lower() != ".gz"]
     if exts:
-        fmt = _EXT_FORMAT_MAP.get(exts[-1])
+        fmt = _EXT_FORMAT_MAP.get(exts[-1].lower())
         if fmt is not None:
             return fmt
     return "auto"
@@ -536,21 +564,29 @@ def _resolve_format_from_path(path: Path) -> Format:
 def _read_file(
     path: str | Path,
     format: Format,
-) -> tuple[DocumentInput, Format]:
-    """Read a file and resolve its format.
+    title: str = "",
+) -> tuple[DocumentInput, Format, str]:
+    """Read a file and resolve its format and (for Office files) title.
 
-    Returns (data, format) where data is ``str`` for Markdown files and
-    ``bytes`` for XML files.
+    Returns (data, format, title) where data is ``str`` for Markdown files
+    and ``bytes`` otherwise.  *title* is filled from the file name for
+    Office formats when not given; other formats leave it untouched.
     """
     path = Path(path)
     if format == "auto":
         format = _resolve_format_from_path(path)
     if format == "markdown":
-        return path.read_text(encoding="utf-8"), format
-    return path.read_bytes(), format
+        return path.read_text(encoding="utf-8"), format, title
+    data = path.read_bytes()
+    if not title:
+        from agr_abc_document_parsers.converter import is_zip, office_display_name
+
+        if format in _OFFICE_FORMATS or (format == "auto" and is_zip(data)):
+            title = office_display_name(path.name)
+    return data, format, title
 
 
-def _parse_content(data: DocumentInput, format: Format) -> Document:
+def _parse_content(data: DocumentInput, format: Format, title: str = "") -> Document:
     """Dispatch *data* to the correct parser.
 
     Imports are deferred to avoid circular dependencies (models is imported
@@ -582,5 +618,9 @@ def _parse_content(data: DocumentInput, format: Format) -> Document:
         from agr_abc_document_parsers.jats_parser import parse_jats
 
         return parse_jats(data)
+    if detected in _OFFICE_FORMATS:
+        from agr_abc_document_parsers.converter import parse_office
+
+        return parse_office(data, source_format=detected, title=title)
 
     raise ValueError(f"Unknown format: '{detected}'")
